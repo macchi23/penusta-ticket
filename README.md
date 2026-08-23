@@ -1,6 +1,7 @@
 # penusta-ticket
 
-架空スタジアム「ペヌスタ」のチケット販売サイト（遊び場）。構想は [docs/concept.md](docs/concept.md)。
+架空スタジアム「ペヌスタ」のチケット販売サイト（遊び場）。
+構想は [docs/concept.md](docs/concept.md)、開発の引き継ぎ事項は [docs/dev-notes.md](docs/dev-notes.md)。
 
 ## 構成
 
