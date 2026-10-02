@@ -9,6 +9,7 @@ use App\Models\Seat;
 use App\Models\TicketType;
 use Carbon\Carbon;
 use Illuminate\Console\Command;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Str;
@@ -205,11 +206,11 @@ class GenerateDemoData extends Command
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<int, Block>  $blocks
-     * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection>  $seatsByBlock
-     * @param  \Illuminate\Support\Collection<int, \Illuminate\Support\Collection>  $allocationsByMatch
+     * @param  Collection<int, Block>  $blocks
+     * @param  Collection<int, Collection>  $seatsByBlock
+     * @param  Collection<int, Collection>  $allocationsByMatch
      * @param  array<int, array<int, array<int, int>>>  $priceMap
-     * @param  \Illuminate\Support\Collection<string, int>  $ticketTypeIds
+     * @param  Collection<string, int>  $ticketTypeIds
      */
     private function generateForMatch(
         FootballMatch $match,

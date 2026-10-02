@@ -5,8 +5,8 @@
 
 ## 構成
 
-- `backend/` — Laravel 12 (API)
-- `frontend/` — Next.js 15 (App Router / TypeScript)
+- `backend/` — Laravel 13 (API)
+- `frontend/` — Next.js 16.3 (App Router / TypeScript)
 - `docker/` — php-fpm / nginx 設定
 - PostgreSQL 17 / Redis / MinIO / mailpit
 

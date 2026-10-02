@@ -9,6 +9,7 @@ use App\Models\FootballMatch;
 use App\Models\MatchBlockAllocation;
 use App\Models\Stadium;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Collection;
 
 class AllocationSeeder extends Seeder
 {
@@ -48,7 +49,7 @@ class AllocationSeeder extends Seeder
     }
 
     /**
-     * @param  \Illuminate\Support\Collection<string, Block>  $blocks
+     * @param  Collection<string, Block>  $blocks
      * @param  array<int, string>  $awayCodes
      * @param  array<int, string>  $bufferCodes
      */
