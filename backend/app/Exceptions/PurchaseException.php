@@ -30,6 +30,16 @@ class PurchaseException extends Exception
         return new self('cart_expired', 'カートの有効期限が切れました。', 409);
     }
 
+    public static function cartEmpty(): self
+    {
+        return new self('cart_empty', 'カートに有効な席がありません。', 422);
+    }
+
+    public static function paymentDeclined(): self
+    {
+        return new self('payment_declined', '決済が承認されませんでした。', 402);
+    }
+
     public static function cartLimitReached(int $max): self
     {
         return new self('cart_limit_reached', "1 回のご購入は {$max} 枚までです。", 422);

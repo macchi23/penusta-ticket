@@ -274,14 +274,23 @@ class CartTest extends TestCase
         $this->assertSame(0, ActivityEvent::where('event_type', 'remove_from_cart')->count());
     }
 
-    public function test_cart_routes_are_rate_limited_per_user(): void
+    public function test_cart_mutations_are_rate_limited_per_user(): void
     {
         config(['ticketing.cart_rate_per_minute' => 2]);
 
-        $this->getJson($this->url(), $this->h($this->alice))->assertOk();
-        $this->getJson($this->url(), $this->h($this->alice))->assertOk();
-        $this->getJson($this->url(), $this->h($this->alice))->assertStatus(429);
-        $this->getJson($this->url(), $this->h($this->bob))->assertOk();
+        $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $this->add($this->alice, ['seat_id' => $this->seats[2]->id])->assertCreated();
+        $this->add($this->alice, ['seat_id' => $this->seats[3]->id])->assertStatus(429);
+        $this->add($this->bob, ['seat_id' => $this->seats[4]->id])->assertCreated();
+    }
+
+    public function test_cart_show_is_not_rate_limited(): void
+    {
+        config(['ticketing.cart_rate_per_minute' => 2]);
+
+        foreach (range(1, 5) as $_) {
+            $this->getJson($this->url(), $this->h($this->alice))->assertOk();
+        }
     }
 
     public function test_invalid_session_and_device_headers_are_sanitized(): void
