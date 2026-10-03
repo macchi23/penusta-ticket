@@ -109,6 +109,88 @@ class CartService
         }, 3);
     }
 
+    /**
+     * 自由席ブロックの券種ごとの枚数を、このブロックの live held がその枚数になるよう反映する。
+     *
+     * @param  array<int, array{ticket_type_id: int, quantity: int}>  $quantities
+     */
+    public function setUnreservedQuantities(User $user, FootballMatch $match, Block $block, array $quantities, CarbonImmutable $now): CartChange
+    {
+        return DB::transaction(function () use ($user, $match, $block, $quantities, $now) {
+            if ($block->seating_type !== 'unreserved') {
+                throw PurchaseException::notOnSale();
+            }
+            $allocation = MatchBlockAllocation::where('match_id', $match->id)
+                ->where('block_id', $block->id)
+                ->value('allocation') ?? 'closed';
+            $this->saleMethod->assertSellable($match, $allocation);
+
+            $wanted = [];
+            foreach ($quantities as $row) {
+                $type = TicketType::findOrFail($row['ticket_type_id']);
+                $this->saleMethod->assertTicketType($type);
+                $wanted[] = [$type, (int) $row['quantity'], $this->priceFor($match, $block, $type)];
+            }
+
+            $cart = $this->lockOrCreate($user, $match, $now);
+
+            $blockItems = OrderItem::with('ticket')
+                ->where('order_id', $cart->id)
+                ->whereIn('ticket_id', $this->liveTickets($cart, $now)
+                    ->where('status', TicketStatus::Held->value)
+                    ->where('block_id', $block->id)
+                    ->select('id'))
+                ->orderByDesc('id')
+                ->get();
+
+            $heldBefore = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
+
+            $released = 0;
+            $adds = [];
+            $addTotal = 0;
+            foreach ($wanted as [$type, $quantity, $price]) {
+                $mine = $blockItems->where('ticket_type_id', $type->id)->values();
+                $delta = $quantity - $mine->count();
+                if ($delta < 0) {
+                    $drop = $mine->take(-$delta);
+                    Ticket::whereIn('id', $drop->pluck('ticket_id'))
+                        ->update(['status' => TicketStatus::Released->value, 'updated_at' => $now]);
+                    $released += $drop->count();
+                } elseif ($delta > 0) {
+                    $adds[] = [$type, $price, $delta];
+                    $addTotal += $delta;
+                }
+            }
+
+            $heldCount = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
+            $max = (int) config('ticketing.max_tickets_per_order');
+            if ($heldCount + $addTotal > $max) {
+                throw PurchaseException::cartLimitReached($max);
+            }
+
+            if ($addTotal > 0) {
+                if ($heldBefore === 0) {
+                    $cart->expires_at = $now->addMinutes((int) config('ticketing.hold_minutes'));
+                    $cart->save();
+                }
+                $tickets = $this->unreservedStock->holdMany($match, $block, $cart, $cart->expires_at, $now, $addTotal);
+                foreach ($adds as [$type, $price, $count]) {
+                    foreach ($tickets->splice(0, $count) as $ticket) {
+                        OrderItem::create([
+                            'order_id' => $cart->id,
+                            'ticket_id' => $ticket->id,
+                            'ticket_type_id' => $type->id,
+                            'price' => $price,
+                        ]);
+                    }
+                }
+            }
+            $this->refreshTotal($cart, $now);
+
+            return new CartChange($cart, $addTotal + $released > 0, $block, null, $addTotal, $released);
+        }, 3);
+    }
+
     public function changeTicketType(User $user, FootballMatch $match, int $itemId, int $ticketTypeId, CarbonImmutable $now): CartChange
     {
         $change = DB::transaction(function () use ($user, $match, $itemId, $ticketTypeId, $now) {

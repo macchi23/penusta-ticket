@@ -22,6 +22,7 @@ Route::get('/matches/{match}/prices', [MatchPriceController::class, 'index']);
 Route::get('/matches/{match}/cart', [CartController::class, 'show'])->middleware('auth:demo');
 Route::middleware(['auth:demo', 'throttle:cart'])->prefix('/matches/{match}/cart')->group(function () {
     Route::post('/items', [CartController::class, 'store']);
+    Route::put('/blocks/{block}/items', [CartController::class, 'setUnreservedQuantities']);
     Route::patch('/items/{item}', [CartController::class, 'update'])->whereNumber('item');
     Route::delete('/items/{item}', [CartController::class, 'destroy'])->whereNumber('item');
 });

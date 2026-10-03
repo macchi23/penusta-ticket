@@ -9,6 +9,7 @@ use App\Models\MatchBlockAllocation;
 use App\Models\Order;
 use App\Models\Ticket;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Str;
 
 class DbUnreservedStock
@@ -21,6 +22,19 @@ class DbUnreservedStock
      */
     public function hold(FootballMatch $match, Block $block, Order $cart, CarbonImmutable $expiresAt, CarbonImmutable $now): Ticket
     {
+        return $this->holdMany($match, $block, $cart, $expiresAt, $now, 1)->first();
+    }
+
+    /**
+     * 自由席を count 枚まとめて仮押さえする。残席が足りなければ 1 枚も作らず sold_out。
+     *
+     * @return Collection<int, Ticket>
+     */
+    public function holdMany(FootballMatch $match, Block $block, Order $cart, CarbonImmutable $expiresAt, CarbonImmutable $now, int $count): Collection
+    {
+        if ($count <= 0) {
+            return collect();
+        }
         if ($block->seating_type !== 'unreserved') {
             throw PurchaseException::notOnSale();
         }
@@ -40,17 +54,17 @@ class DbUnreservedStock
             ->consumingInventory($now)
             ->count();
 
-        if ($consumed >= $block->capacity) {
+        if ($consumed + $count > $block->capacity) {
             throw PurchaseException::soldOut();
         }
 
-        return Ticket::create([
+        return collect(range(1, $count))->map(fn () => Ticket::create([
             'match_id' => $match->id,
             'block_id' => $block->id,
             'seat_id' => null,
             'status' => 'held',
             'qr_uuid' => (string) Str::uuid(),
             'expires_at' => $expiresAt,
-        ]);
+        ]));
     }
 }

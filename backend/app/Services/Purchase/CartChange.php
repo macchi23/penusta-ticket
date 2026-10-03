@@ -12,5 +12,7 @@ final class CartChange
         public readonly bool $changed,
         public readonly Block $block,
         public readonly ?int $seatId,
+        public readonly int $added = 0,
+        public readonly int $released = 0,
     ) {}
 }

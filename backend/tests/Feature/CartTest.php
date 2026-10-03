@@ -388,6 +388,227 @@ class CartTest extends TestCase
         $this->artisan('tickets:expire-holds')->expectsOutput('expired 0 cart(s)')->assertSuccessful();
     }
 
+    public function test_set_quantities_creates_items_with_prices_and_one_event(): void
+    {
+        $block = $this->bigFree(10);
+
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 2], [$this->child->id, 1]])
+            ->assertOk()->assertJsonPath('cart.total', 12500);
+
+        $this->assertCount(3, $res->json('cart.items'));
+        $prices = collect($res->json('cart.items'))->pluck('price', 'ticket_type.code');
+        $this->assertSame(5000, $prices['adult']);
+        $this->assertSame(2500, $prices['child']);
+        $this->assertSame(3, Ticket::where('status', 'held')->whereNull('seat_id')->count());
+
+        $event = ActivityEvent::where('event_type', 'add_to_cart')->firstOrFail();
+        $this->assertSame(1, ActivityEvent::count());
+        $this->assertEquals([
+            'match_id' => $this->match->id, 'block_code' => 'F2', 'quantity' => 3,
+            'order_id' => Order::firstOrFail()->id, 'seat_id' => null,
+        ], $event->payload);
+    }
+
+    public function test_set_quantities_decrease_releases_newest_items(): void
+    {
+        $block = $this->bigFree(10);
+        $first = $this->setQty($this->alice, $block, [[$this->adult->id, 2], [$this->child->id, 1]])->assertOk();
+        $adultItems = collect($first->json('cart.items'))->where('ticket_type.code', 'adult')->sortBy('id')->values();
+        ActivityEvent::query()->delete();
+
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 1], [$this->child->id, 1]])
+            ->assertOk()->assertJsonPath('cart.total', 7500);
+
+        $this->assertCount(2, $res->json('cart.items'));
+        $this->assertSame('released', Ticket::find($adultItems[1]['ticket_id'])->status->value);
+        $this->assertSame('held', Ticket::find($adultItems[0]['ticket_id'])->status->value);
+        $this->assertSame(0, ActivityEvent::where('event_type', 'add_to_cart')->count());
+        $this->assertSame(1, ActivityEvent::where('event_type', 'remove_from_cart')->count());
+        $this->assertSame(1, ActivityEvent::where('event_type', 'remove_from_cart')->firstOrFail()->payload['quantity']);
+    }
+
+    public function test_set_quantities_zero_releases_everything(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->alice, $block, [[$this->adult->id, 2], [$this->child->id, 1]])->assertOk();
+
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0], [$this->child->id, 0]])
+            ->assertOk()->assertJsonPath('cart.items', [])->assertJsonPath('cart.total', 0);
+        $this->assertSame(3, Ticket::where('status', 'released')->count());
+    }
+
+    public function test_set_quantities_cart_limit_counts_other_blocks_and_rolls_back(): void
+    {
+        $block = $this->bigFree(10);
+        $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $this->setQty($this->alice, $block, [[$this->adult->id, 2]])->assertOk();
+
+        $this->setQty($this->alice, $block, [[$this->adult->id, 3], [$this->child->id, 3]])
+            ->assertStatus(422)->assertJsonPath('code', 'cart_limit_reached');
+
+        $this->assertSame(3, Ticket::where('status', 'held')->count());
+        $this->assertSame(3, DB::table('order_items')->count());
+    }
+
+    public function test_set_quantities_limit_rejection_does_not_release_decreases(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->alice, $block, [[$this->adult->id, 3], [$this->child->id, 3]])->assertOk();
+
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0], [$this->child->id, 7]])
+            ->assertStatus(422)->assertJsonPath('code', 'cart_limit_reached');
+        $this->assertSame(6, Ticket::where('status', 'held')->count());
+        $this->assertSame(0, Ticket::where('status', 'released')->count());
+    }
+
+    public function test_set_quantities_sold_out_changes_nothing(): void
+    {
+        $this->add($this->bob, ['block_id' => $this->free->id])->assertCreated();
+
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, 1], [$this->child->id, 1]])
+            ->assertStatus(409)->assertJsonPath('code', 'sold_out');
+
+        $this->assertSame(1, Ticket::count());
+        $this->assertSame(1, DB::table('order_items')->count());
+        $this->assertSame(0, ActivityEvent::where('user_id', $this->alice->id)->count());
+    }
+
+    public function test_set_quantities_not_on_sale_cases(): void
+    {
+        $this->setQty($this->alice, $this->reserved, [[$this->adult->id, 1]])
+            ->assertStatus(422)->assertJsonPath('code', 'not_on_sale');
+        $this->setQty($this->alice, $this->free, [[$this->pass->id, 1]])
+            ->assertStatus(422)->assertJsonPath('code', 'not_on_sale');
+
+        MatchBlockAllocation::where('block_id', $this->free->id)->update(['allocation' => 'closed']);
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, 1]])
+            ->assertStatus(422)->assertJsonPath('code', 'not_on_sale');
+
+        MatchBlockAllocation::where('block_id', $this->free->id)->update(['allocation' => 'away']);
+        $this->match->update(['status' => 'upcoming']);
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, 1]])
+            ->assertStatus(422)->assertJsonPath('code', 'not_on_sale');
+
+        $this->assertSame(0, Ticket::count());
+    }
+
+    public function test_set_quantities_price_not_found(): void
+    {
+        MatchPrice::where('ticket_type_id', $this->child->id)->delete();
+
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, 1], [$this->child->id, 1]])
+            ->assertStatus(422)->assertJsonPath('code', 'price_not_found');
+        $this->assertSame(0, Ticket::count());
+    }
+
+    public function test_set_quantities_validation(): void
+    {
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, 1], [$this->adult->id, 1]])->assertStatus(422);
+        $this->setQty($this->alice, $this->free, [[$this->adult->id, -1]])->assertStatus(422);
+        $this->setQty($this->alice, $this->free, [[9999, 1]])->assertStatus(422);
+        $this->setQty($this->alice, $this->free, [])->assertStatus(422);
+        $this->putJson("/api/matches/{$this->match->id}/cart/blocks/999999/items", ['quantities' => [['ticket_type_id' => $this->adult->id, 'quantity' => 1]]], $this->h($this->alice))
+            ->assertStatus(404);
+        $this->assertSame(0, Ticket::count());
+    }
+
+    public function test_set_quantities_on_expired_cart_uses_new_cart(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->alice, $block, [[$this->adult->id, 2]])->assertOk();
+        $old = Order::firstOrFail();
+
+        $this->travelTo(Carbon::parse('2026-06-01 00:10:00', 'UTC'));
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 1]])->assertOk();
+
+        $this->assertNotSame($old->id, $res->json('cart.id'));
+        $this->assertCount(1, $res->json('cart.items'));
+        $this->assertSame('expired', $old->fresh()->status->value);
+        $this->assertSame(2, Ticket::where('status', 'expired')->count());
+    }
+
+    public function test_set_quantities_resets_expiry_when_no_live_held(): void
+    {
+        $block = $this->bigFree(10);
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 1]])->assertOk();
+        $orderId = $res->json('cart.id');
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0]])->assertOk();
+
+        $this->travelTo(Carbon::parse('2026-06-01 00:08:00', 'UTC'));
+        $this->setQty($this->alice, $block, [[$this->adult->id, 2]])->assertOk();
+
+        $expected = Carbon::parse('2026-06-01 00:18:00', 'UTC');
+        $this->assertTrue(Order::find($orderId)->expires_at->equalTo($expected));
+        $this->assertSame(2, Ticket::where('status', 'held')->where('expires_at', $expected)->count());
+    }
+
+    public function test_set_quantities_does_not_touch_other_users_holds(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->bob, $block, [[$this->adult->id, 2]])->assertOk();
+        $this->setQty($this->alice, $block, [[$this->adult->id, 1]])->assertOk();
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0]])->assertOk();
+
+        $bobOrder = Order::where('user_id', $this->bob->id)->firstOrFail();
+        $this->assertSame(2, DB::table('order_items')->where('order_id', $bobOrder->id)->count());
+        $this->assertSame(2, Ticket::where('status', 'held')->count());
+        $this->assertSame(10000, $bobOrder->fresh()->total);
+    }
+
+    public function test_set_quantities_swap_keeps_expiry(): void
+    {
+        $block = $this->bigFree(10);
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 2]])->assertOk();
+        $orderId = $res->json('cart.id');
+        $original = Order::find($orderId)->expires_at;
+
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:00', 'UTC'));
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0], [$this->child->id, 2]])->assertOk();
+
+        $this->assertTrue(Order::find($orderId)->expires_at->equalTo($original));
+        $this->assertSame(2, Ticket::where('status', 'held')->where('expires_at', $original)->count());
+    }
+
+    public function test_set_quantities_rejects_too_many_rows(): void
+    {
+        $rows = array_map(fn ($n) => [$this->adult->id + $n, 1], range(0, 10));
+        $this->setQty($this->alice, $this->free, $rows)->assertStatus(422);
+    }
+
+    public function test_set_quantities_mixed_add_and_remove_records_two_events(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->alice, $block, [[$this->adult->id, 1], [$this->child->id, 2]])->assertOk();
+        ActivityEvent::query()->delete();
+
+        $this->setQty($this->alice, $block, [[$this->adult->id, 2], [$this->child->id, 1]])->assertOk();
+
+        $this->assertSame(1, ActivityEvent::where('event_type', 'add_to_cart')->firstOrFail()->payload['quantity']);
+        $this->assertSame(1, ActivityEvent::where('event_type', 'remove_from_cart')->firstOrFail()->payload['quantity']);
+        $this->assertSame(2, ActivityEvent::count());
+    }
+
+    public function test_set_quantities_swap_at_full_capacity_succeeds(): void
+    {
+        $block = $this->makeBlock(Stand::firstOrFail(), SeatCategory::firstOrFail(), 'F3', 'unreserved', 1, 'home');
+        $this->setQty($this->alice, $block, [[$this->adult->id, 1]])->assertOk();
+
+        $this->setQty($this->alice, $block, [[$this->adult->id, 0], [$this->child->id, 1]])
+            ->assertOk()->assertJsonPath('cart.total', 2500);
+    }
+
+    private function bigFree(int $capacity): Block
+    {
+        return $this->makeBlock(Stand::firstOrFail(), SeatCategory::firstOrFail(), 'F2', 'unreserved', $capacity, 'home');
+    }
+
+    private function setQty(User $user, Block $block, array $pairs)
+    {
+        $body = ['quantities' => array_map(fn ($p) => ['ticket_type_id' => $p[0], 'quantity' => $p[1]], $pairs)];
+
+        return $this->putJson($this->url("/blocks/{$block->id}/items"), $body, $this->h($user));
+    }
+
     private function makeBlock(Stand $stand, SeatCategory $category, string $code, string $type, int $capacity, string $allocation): Block
     {
         $block = Block::create([

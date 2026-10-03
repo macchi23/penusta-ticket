@@ -85,6 +85,7 @@ export type Order = {
   items: OrderItem[];
 };
 export type CartResponse = { cart: Order | null; server_time: string; max_items: number };
+export type UnreservedQuantity = { ticket_type_id: number; quantity: number };
 export type ApiErrorCode =
   | "seat_unavailable" | "sold_out" | "cart_expired"
   | "cart_limit_reached" | "not_on_sale" | "price_not_found" | "cart_empty"
