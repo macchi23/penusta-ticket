@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 検証の一本化。使い方: scripts/check.sh [backend|frontend|all]
+# 検証の一本化。使い方: scripts/check.sh [backend|frontend|e2e|all]
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -44,6 +44,19 @@ frontend() {
   step "tsc" docker compose exec -T frontend npx tsc --noEmit
 }
 
+# E2E はホストで実行する。dev 環境（開発 DB）に対して走るため all には含めない
+e2e() {
+  if ! { curl -sf http://localhost:3100/ >/dev/null && curl -sf http://localhost:8080/api/health >/dev/null; }; then
+    echo "dev 環境に接続できない。docker compose up -d を実行する" >&2
+    exit 2
+  fi
+  if [ ! -d e2e/node_modules ]; then
+    echo "初回は cd e2e && npm ci && npx playwright install chromium" >&2
+    exit 2
+  fi
+  step "playwright" sh -c 'cd e2e && npx playwright test'
+}
+
 if ! docker compose ps --status running --services >/dev/null 2>&1; then
   echo "docker に接続できない。Docker を起動して docker compose up -d を実行する" >&2
   exit 2
@@ -52,8 +65,9 @@ fi
 case "$target" in
   backend) backend ;;
   frontend) frontend ;;
+  e2e) e2e ;;
   all) backend; frontend ;;
-  *) echo "usage: scripts/check.sh [backend|frontend|all]" >&2; exit 2 ;;
+  *) echo "usage: scripts/check.sh [backend|frontend|e2e|all]" >&2; exit 2 ;;
 esac
 
 echo

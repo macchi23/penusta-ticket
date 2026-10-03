@@ -6,6 +6,7 @@
 ## 必須ルール
 
 - artisan / composer / npm はコンテナ経由（`docker compose exec app ...` / `docker compose exec frontend ...`）。ホストの PHP は使えない
+- 例外: E2E（`e2e/`）はホストで実行する（`scripts/check.sh e2e`。初回は `cd e2e && npm ci && npx playwright install chromium`）
 - 時刻は UTC で保存する。JST の値は `Carbon::parse($v, 'Asia/Tokyo')->utc()` で明示変換してから保存
 - Next.js のコードを書く前に `frontend/node_modules/next/dist/docs/` の該当ガイドを読む（学習済みの規約と違う）
 - API 契約は `frontend/src/lib/api.ts` の型が正。backend をこれに合わせる

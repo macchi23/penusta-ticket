@@ -61,6 +61,7 @@ export default function SeatMapView({
           {seatmap.blocks.map((b) => (
             <g
               key={b.id}
+              data-testid={`block-${b.id}`}
               onClick={() => b.allocation !== "closed" && onSelectBlock(b)}
               className={b.allocation === "closed" ? "cursor-not-allowed" : "cursor-pointer"}
             >

@@ -43,6 +43,8 @@ export default function SeatGrid({
                   key={s.id}
                   type="button"
                   disabled={!clickable}
+                  data-testid={`seat-${s.id}`}
+                  data-status={status}
                   title={`${row.row}列 ${s.number}番 (${status})`}
                   onClick={() =>
                     status === "mine" ? onRelease(s.id) : onHold(s.id, row.row, s.number)

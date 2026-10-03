@@ -39,6 +39,8 @@ docker compose 7サービス（app/web/frontend/db/redis/minio/mailpit）で、
    キャッシュのガイドは2系統ある。`01-getting-started/08-caching.md` は Cache Components が有効な前提で、
    このリポジトリ（`next.config.ts` で `cacheComponents` 無効）では `02-guides/caching-without-cache-components.md` を読む。
    middleware は `src/proxy.ts`（`export function proxy`）に改名されている。
+7. **E2E（`e2e/`）はホストで実行する**（npm コンテナ経由ルールの例外）: `scripts/check.sh e2e`。
+   初回は `cd e2e && npm ci && npx playwright install chromium`。dev 環境（3100 / 8080）が起動している必要がある。
 
 ## ゼロから再構築する手順
 
@@ -95,6 +97,7 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
   `add_to_cart` は 1 クリック 1 件なので、合成データ（1 注文 1 件）とは `COUNT(*)` の粒度が違う（`SUM(quantity)` は一致）
 - 同時実行の確認は `RefreshDatabase` ではできない。開発環境に同じ席へ並列 POST して 201 が 1 件になることを確認した
   （2026-10-03、8 並列）。自由席の並列は未確認
+- E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e0%'` で除外できる
 
 ## 購入フローの申し送り（レビューで出て、骨格では見送った点）
 
