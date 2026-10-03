@@ -68,6 +68,16 @@ services:
     volumes:
       - minio-data:/data
 
+  analytics:
+    image: duckdb/duckdb:1.5.6
+    profiles: ["analytics"]
+    working_dir: /workspace
+    volumes:
+      - ./analytics:/workspace
+      - duckdb-ext:/duckdb-ext
+    depends_on:
+      - minio
+
   mailpit:
     image: axllent/mailpit
     ports:
@@ -78,3 +88,4 @@ volumes:
   pgdata:
   minio-data:
   frontend-node-modules:
+  duckdb-ext:
