@@ -41,7 +41,7 @@ class MatchController extends Controller
         $blockPayload = $blocks->map(function (Block $block) use ($allocations, $soldCounts) {
             $allocation = $allocations->get($block->id, 'closed');
             $sold = (int) ($soldCounts->get($block->id, 0));
-            $available = $allocation === 'closed' ? 0 : max(0, $block->capacity - $sold);
+            $available = ! in_array($allocation, ['home', 'away'], true) ? 0 : max(0, $block->capacity - $sold);
 
             return [
                 'id' => $block->id,

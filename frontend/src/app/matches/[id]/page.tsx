@@ -45,7 +45,9 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
   const cart = cartRes.ok ? cartRes.data : null;
   const cartError = !cartRes.ok && cartRes.status !== 401;
   const pricesError = !pricesRes.ok && pricesRes.status !== 404;
-  const selectedBlock = seatmap.blocks.find((b) => b.id === blockId) ?? null;
+  const foundBlock = seatmap.blocks.find((b) => b.id === blockId) ?? null;
+  const selectedBlock =
+    foundBlock && (foundBlock.allocation === "home" || foundBlock.allocation === "away") ? foundBlock : null;
   const reservedSelected = selectedBlock?.seating_type === "reserved";
   const blockSeats = reservedSelected && seatsRes?.ok ? seatsRes.data : null;
   const seatsError = reservedSelected && seatsRes !== null && !seatsRes.ok && seatsRes.status !== 404;

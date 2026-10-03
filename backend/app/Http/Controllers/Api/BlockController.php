@@ -18,6 +18,11 @@ class BlockController extends Controller
             abort(404);
         }
 
+        $allocation = $match->blockAllocations()->where('block_id', $block->id)->value('allocation');
+        if (! in_array($allocation, ['home', 'away'], true)) {
+            abort(404);
+        }
+
         $now = CarbonImmutable::now();
 
         $block->load('stand');

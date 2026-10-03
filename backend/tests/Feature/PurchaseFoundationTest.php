@@ -94,6 +94,22 @@ class PurchaseFoundationTest extends TestCase
         $this->assertSeatStatuses([1 => 'sold', 2 => 'available', 3 => 'available', 4 => 'available', 5 => 'available']);
     }
 
+    public function test_seatmap_available_is_zero_for_buffer_and_closed(): void
+    {
+        foreach (['buffer', 'closed'] as $allocation) {
+            MatchBlockAllocation::where('match_id', $this->match->id)->update(['allocation' => $allocation]);
+            $this->assertSeatmapAvailable(0);
+        }
+    }
+
+    public function test_seats_is_404_for_buffer_and_closed_blocks(): void
+    {
+        foreach (['buffer', 'closed'] as $allocation) {
+            MatchBlockAllocation::where('match_id', $this->match->id)->update(['allocation' => $allocation]);
+            $this->getJson("/api/matches/{$this->match->id}/blocks/{$this->block->id}/seats")->assertStatus(404);
+        }
+    }
+
     public function test_held_ticket_is_not_consumed_at_exact_expiry(): void
     {
         $expiresAt = Carbon::parse('2026-01-01 00:10:00', 'UTC');

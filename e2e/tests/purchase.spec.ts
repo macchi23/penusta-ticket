@@ -49,4 +49,9 @@ test('空席を選んで購入を完了できる', async ({ page, context }) => 
   const orderId = Number(new URL(page.url()).pathname.split('/').pop());
   expect((await getOrder(userA, orderId)).status).toBe('paid');
   await expect.poll(() => seatStatus(matchId, blockId, seat.id)).toBe('sold');
+
+  await page.goBack();
+  await expect(page).toHaveURL(new RegExp(`/matches/${matchId}`));
+  await expect(page.getByText('席を選ぶとここに表示されます。')).toBeVisible({ timeout: 10_000 });
+  await expect(seatButton(page, seat.id)).toHaveAttribute('data-status', 'sold', { timeout: 10_000 });
 });

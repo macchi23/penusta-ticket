@@ -12,9 +12,13 @@ const ALLOCATION_COLORS: Record<Allocation, string> = {
 const ALLOCATION_LABELS: Record<Allocation, string> = {
   home: "ホーム",
   away: "アウェー",
-  buffer: "緩衝帯",
+  buffer: "緩衝帯（販売なし）",
   closed: "閉鎖",
 };
+
+function isSellableAllocation(b: BlockInfo): boolean {
+  return b.allocation === "home" || b.allocation === "away";
+}
 
 function blockOpacity(b: BlockInfo): number {
   if (b.allocation === "buffer" || b.allocation === "closed") return 0.5;
@@ -62,8 +66,8 @@ export default function SeatMapView({
             <g
               key={b.id}
               data-testid={`block-${b.id}`}
-              onClick={() => b.allocation !== "closed" && onSelectBlock(b)}
-              className={b.allocation === "closed" ? "cursor-not-allowed" : "cursor-pointer"}
+              onClick={() => isSellableAllocation(b) && onSelectBlock(b)}
+              className={isSellableAllocation(b) ? "cursor-pointer" : "cursor-not-allowed"}
             >
               <rect
                 x={b.geometry.x}

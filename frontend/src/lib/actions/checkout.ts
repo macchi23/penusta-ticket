@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
 import type { ActionResult, Order } from "@/lib/api";
 import { apiCall } from "@/lib/server-api";
@@ -17,5 +18,6 @@ export async function checkout(
   }
   const result = await apiCall<{ order: Order }>("POST", `/api/orders/${orderId}/checkout`);
   if (!result.ok) return result;
+  revalidatePath("/matches/[id]", "page");
   redirect(`/orders/${result.data.order.id}`, RedirectType.replace);
 }
