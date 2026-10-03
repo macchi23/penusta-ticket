@@ -91,3 +91,4 @@ export type ApiErrorCode =
   | "payment_declined" | "user_required" | "validation_failed" | "unknown";
 export type ApiError = { code: ApiErrorCode; message: string };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
+export type SeatDisplayStatus = SeatStatus | "mine";
