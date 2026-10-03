@@ -446,10 +446,19 @@ class GenerateDemoData extends Command
         $device = $this->weightedPick(['mobile' => 60, 'desktop' => 30, 'tablet' => 10]);
         $now = now();
 
+        // 購入時刻から逆算し、各ステップを前ステップの 1 分以上後に置く。
+        // mt_rand の呼び出し順と幅（max - min）は旧実装と同じ。
+        $gapMatchToSeatmap = mt_rand(1, 18);   // 幅 17（旧 mt_rand(8, 25) と同じ）
+        $gapSeatmapToCart = mt_rand(1, 12);    // 幅 11（旧 mt_rand(4, 15) と同じ）
+        $gapCartToPurchase = mt_rand(1, 6);    // 幅 5（旧 mt_rand(1, 6) と同じ）
+        $cartOffset = $gapCartToPurchase;
+        $seatmapOffset = $cartOffset + $gapSeatmapToCart;
+        $matchOffset = $seatmapOffset + $gapMatchToSeatmap;
+
         $steps = [
-            ['type' => 'view_match', 'offsetMinutes' => mt_rand(8, 25), 'payload' => ['match_id' => $match->id]],
-            ['type' => 'view_seatmap', 'offsetMinutes' => mt_rand(4, 15), 'payload' => ['match_id' => $match->id, 'block_code' => $order['block_code']]],
-            ['type' => 'add_to_cart', 'offsetMinutes' => mt_rand(1, 6), 'payload' => ['match_id' => $match->id, 'block_code' => $order['block_code'], 'quantity' => $itemCount]],
+            ['type' => 'view_match', 'offsetMinutes' => $matchOffset, 'payload' => ['match_id' => $match->id]],
+            ['type' => 'view_seatmap', 'offsetMinutes' => $seatmapOffset, 'payload' => ['match_id' => $match->id, 'block_code' => $order['block_code']]],
+            ['type' => 'add_to_cart', 'offsetMinutes' => $cartOffset, 'payload' => ['match_id' => $match->id, 'block_code' => $order['block_code'], 'quantity' => $itemCount]],
             ['type' => 'purchase', 'offsetMinutes' => 0, 'payload' => ['match_id' => $match->id, 'order_id' => $orderId, 'quantity' => $itemCount]],
         ];
 
