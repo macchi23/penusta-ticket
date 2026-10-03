@@ -108,7 +108,6 @@ services:
 
 volumes:
   pgdata:
-  minio-data:
   rustfs-data:
   frontend-node-modules:
   duckdb-ext:

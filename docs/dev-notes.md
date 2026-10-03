@@ -171,7 +171,7 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 - S3 互換ストレージは MinIO から RustFS（`rustfs/rustfs:1.0.1`、Apache-2.0）に置き換えた（2026-10-04）。`minio/minio` と `minio/mc` は
   Docker Hub から削除され、quay.io も匿名 pull 不可で、ゼロから再構築できなくなっていた（GitHub の minio/minio も archived）。
   mc の代わりに aws CLI コンテナ（profile `tools`）を使う。イメージはタグ + digest で固定。タグ無しのイメージ（`axllent/mailpit` 等）は
-  手元のキャッシュで動いてしまい配布終了に気づけないので、ゼロから再構築するときに確かめる。旧 `minio-data` ボリュームは未削除。
+  手元のキャッシュで動いてしまい配布終了に気づけないので、ゼロから再構築するときに確かめる。旧 `minio-data` ボリュームは削除済み。
   minio コンテナが残っている環境では 9000/9001 が塞がるので、`docker compose up -d --remove-orphans` で旧コンテナを片付ける
 - 合成データの購入セッションは、各ステップを前ステップの 1〜18 / 1〜12 / 1〜6 分後に積み上げる（2026-10-04 修正、旧実装は購入時刻からの
   独立オフセットで順序が約 2 割逆転していた）。実アプリの view_match → view_seatmap は数秒差なので、分単位の間隔はまだ長め。
