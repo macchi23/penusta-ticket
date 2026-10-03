@@ -12,20 +12,24 @@ import type {
   MatchPrice,
   OrderItem,
   SeatMap,
+  UnreservedQuantity,
 } from "@/lib/api";
 import {
   changeTicketType,
   holdSeat,
-  holdUnreserved,
   releaseItem,
+  setUnreservedQuantities,
 } from "@/lib/actions/cart";
 import SeatMapView from "@/components/SeatMapView";
 import SeatGrid from "@/components/SeatGrid";
 import UnreservedPicker from "@/components/UnreservedPicker";
 import CartSummary from "@/components/CartSummary";
 
+let tempId = 0;
+
 type OptimisticAction =
   | { type: "add"; item: OrderItem }
+  | { type: "setBlock"; block: BlockInfo; quantities: UnreservedQuantity[]; prices: MatchPrice[] }
   | { type: "remove"; itemId: number }
   | { type: "retype"; itemId: number; ticketType: OrderItem["ticket_type"]; price: number };
 
@@ -41,7 +45,41 @@ function reducer(state: CartResponse | null, action: OptimisticAction): CartResp
     items: [],
   };
   let items = base.items;
-  if (action.type === "add") items = [...items, action.item];
+  let expiresAt = base.expires_at;
+  if (action.type === "add") {
+    // 有効な明細が 0 件のカートに足すと backend が expires_at を付け直す
+    if (items.length === 0) expiresAt = null;
+    items = [...items, action.item];
+  } else if (action.type === "setBlock") {
+    const { block } = action;
+    let next = items;
+    let added = 0;
+    for (const q of action.quantities) {
+      const own = next.filter((i) => i.block.id === block.id && !i.seat && i.ticket_type.id === q.ticket_type_id);
+      if (q.quantity < own.length) {
+        const drop = new Set(own.slice(q.quantity).map((i) => i.id));
+        next = next.filter((i) => !drop.has(i.id));
+      } else if (q.quantity > own.length) {
+        const p = action.prices.find(
+          (x) => x.seat_category === block.seat_category && x.ticket_type.id === q.ticket_type_id,
+        );
+        const extra = Array.from({ length: q.quantity - own.length }, (): OrderItem => ({
+          id: --tempId,
+          ticket_id: 0,
+          block: { id: block.id, code: block.code, stand: block.stand },
+          seating_type: block.seating_type,
+          seat: null,
+          seat_category: block.seat_category,
+          ticket_type: p?.ticket_type ?? { id: q.ticket_type_id, code: "", name: "" },
+          price: p?.price ?? 0,
+        }));
+        added += extra.length;
+        next = [...next, ...extra];
+      }
+    }
+    if (items.length === 0 && added > 0) expiresAt = null;
+    items = next;
+  }
   else if (action.type === "remove") items = items.filter((i) => i.id !== action.itemId);
   else
     items = items.map((i) =>
@@ -49,7 +87,7 @@ function reducer(state: CartResponse | null, action: OptimisticAction): CartResp
     );
   return {
     ...state,
-    cart: { ...base, items, total: items.reduce((s, i) => s + i.price, 0) },
+    cart: { ...base, expires_at: expiresAt, items, total: items.reduce((s, i) => s + i.price, 0) },
   };
 }
 
@@ -63,6 +101,8 @@ function errorMessage(e: ApiError, maxItems: number): string {
       return `1 回の注文は ${maxItems} 枚までです`;
     case "cart_expired":
       return "仮押さえの期限が切れました。選び直してください";
+    case "price_not_found":
+      return "この券種は販売していません";
     case "not_on_sale":
       return "この席は現在販売していません";
     case "user_required":
@@ -71,8 +111,6 @@ function errorMessage(e: ApiError, maxItems: number): string {
       return "エラーが発生しました";
   }
 }
-
-let tempId = 0;
 
 export default function MatchPurchase({
   match,
@@ -214,12 +252,13 @@ export default function MatchPurchase({
                 {selectedBlock.seating_type === "unreserved" ? (
                   <UnreservedPicker
                     block={selectedBlock}
-                    mineCount={items.filter((i) => i.block.id === selectedBlock.id).length}
-                    atLimit={atLimit}
+                    prices={prices}
+                    items={items}
+                    maxItems={maxItems}
                     disabled={locked}
-                    onAdd={() =>
-                      run({ type: "add", item: tempItem(selectedBlock, null) }, () =>
-                        holdUnreserved(match.id, selectedBlock.id),
+                    onApply={(quantities) =>
+                      run({ type: "setBlock", block: selectedBlock, quantities, prices }, () =>
+                        setUnreservedQuantities(match.id, selectedBlock.id, quantities),
                       )
                     }
                   />
@@ -230,6 +269,7 @@ export default function MatchPurchase({
                     blockSeats={blockSeats}
                     mineSeatIds={mineSeatIds}
                     pendingSeatIds={pendingSeatIds}
+                    atLimit={atLimit}
                     disabled={locked}
                     onHold={(seatId, row, number) =>
                       run(

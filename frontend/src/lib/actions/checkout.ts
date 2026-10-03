@@ -1,6 +1,6 @@
 "use server";
 
-import { redirect } from "next/navigation";
+import { redirect, RedirectType } from "next/navigation";
 import type { ActionResult, Order } from "@/lib/api";
 import { apiCall } from "@/lib/server-api";
 
@@ -17,5 +17,5 @@ export async function checkout(
   }
   const result = await apiCall<{ order: Order }>("POST", `/api/orders/${orderId}/checkout`);
   if (!result.ok) return result;
-  redirect(`/orders/${result.data.order.id}`);
+  redirect(`/orders/${result.data.order.id}`, RedirectType.replace);
 }

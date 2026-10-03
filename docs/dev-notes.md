@@ -41,6 +41,10 @@ docker compose 7サービス（app/web/frontend/db/redis/minio/mailpit）で、
    middleware は `src/proxy.ts`（`export function proxy`）に改名されている。
 7. **E2E（`e2e/`）はホストで実行する**（npm コンテナ経由ルールの例外）: `scripts/check.sh e2e`。
    初回は `cd e2e && npm ci && npx playwright install chromium`。dev 環境（3100 / 8080）が起動している必要がある。
+8. `notFound()` / `redirect()` を使うページで dev のオーバーレイ `Failed to execute 'measure' on 'Performance': ... cannot have a negative time stamp` が出ることがある。
+   React の dev 専用計測の既知のバグ（vercel/next.js #86060 / #99032、facebook/react #37561）で、Docker VM の一時停止で
+   `next-server` の単調クロックが実時間から遅れると発生する。`docker compose restart frontend` で解消する。production には計測コードが無い。
+   E2E で `pageerror` を拾う場合は実行前に再起動する。
 
 ## ゼロから再構築する手順
 
@@ -94,7 +98,10 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
   `src/proxy.ts`（旧 middleware）がセッション cookie を発行する
 - 行動ログ: `add_to_cart` / `remove_from_cart` / `purchase` / `payment_failed` は backend がトランザクション確定後に記録、
   `view_match` / `view_seatmap` は frontend の `ViewTracker` が `POST /api/events` に送る。
-  `add_to_cart` は 1 クリック 1 件なので、合成データ（1 注文 1 件）とは `COUNT(*)` の粒度が違う（`SUM(quantity)` は一致）
+  指定席の `add_to_cart` は 1 クリック 1 件（`quantity: 1`）、自由席は一括反映 1 回につき 1 件（`quantity` = 枚数）。
+  合成データ（1 注文 1 件）とは `COUNT(*)` の粒度が違うことがある（`SUM(quantity)` は一致）
+- 自由席は `PUT /api/matches/{match}/cart/blocks/{block}/items` に券種ごとの枚数を送って一括反映する（増減を 1 トランザクションで）。
+  `POST /cart/items` の `{block_id}`（1 枚追加）も残っているが frontend からは使っていない
 - 同時実行の確認は `RefreshDatabase` ではできない。開発環境に同じ席へ並列 POST して 201 が 1 件になることを確認した
   （2026-10-03、8 並列）。自由席の並列は未確認
 - E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e0%'` で除外できる
@@ -115,6 +122,11 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
   条件は `FirstComeSaleMethod::assertSellable` に足せばよい
 - 本番相当の設定（`APP_ENV=production`、`DEMO_AUTH_ENABLED=false`）で demo guard と `/api/demo/*` が閉じることはテストで確認済み。
   本物の認証は `auth:demo` を `auth:sanctum` に書き換えるのが入口
+- 「`now` はロック取得後に取る」を守っているのは `CheckoutService` だけ。`CartService` 系はコントローラで取った `now` をトランザクションに
+  渡している（ロック待ちの間に期限が過ぎても期限内として扱う窓がある。影響は仮押さえの可否判定だけで、二重販売にはならない）。
+  `CartService` も同じ流儀に揃えるのが課題
+- 「同じトランザクション内で解放してから取り直す」処理は仮押さえの延長に化けやすい（`setUnreservedQuantities` で一度出て修正済み）。
+  今後 Redis 版などを作るときも、期限の付け直しは「操作前に有効な held が 0 件」の条件で判定する
 
 ## 次にやること
 

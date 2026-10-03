@@ -51,6 +51,33 @@ export async function pickReservedBlock(matchId: number): Promise<number> {
   return b.id;
 }
 
+export async function pickUnreservedBlock(matchId: number): Promise<number> {
+  const { blocks } = await getJson<{ blocks: Block[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const b = blocks
+    .filter((x) => x.seating_type === 'unreserved' && (x.allocation === 'home' || x.allocation === 'away') && x.available >= 3)
+    .sort((a, b) => b.available - a.available)[0];
+  if (!b) throw new Error('残席 3 以上の自由席ブロックがない');
+  return b.id;
+}
+
+export async function getBlockSeatCategory(matchId: number, blockId: number): Promise<string> {
+  const { blocks } = await getJson<{ blocks: (Block & { seat_category: string })[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const b = blocks.find((x) => x.id === blockId);
+  if (!b) throw new Error(`ブロック ${blockId} が見つからない`);
+  return b.seat_category;
+}
+
+// そのブロックの席種で売っている券種名（season_pass を除く、API の順）
+export async function getTicketTypeNames(matchId: number, seatCategory: string): Promise<string[]> {
+  const res = await getJson<{ data: { seat_category: string; ticket_type: { code: string; name: string } }[] }>(
+    undefined,
+    `/api/matches/${matchId}/prices`,
+  );
+  return res.data
+    .filter((p) => p.seat_category === seatCategory && p.ticket_type.code !== 'season_pass')
+    .map((p) => p.ticket_type.name);
+}
+
 export async function pickAvailableSeat(
   matchId: number,
   blockId: number,
@@ -94,4 +121,9 @@ export async function seatStatus(matchId: number, blockId: number, seatId: numbe
 export async function getOrder(userId: number, orderId: number): Promise<{ id: number; status: string }> {
   const { order } = await getJson<{ order: { id: number; status: string } }>(userId, `/api/orders/${orderId}`);
   return order;
+}
+
+export async function cartItemCount(userId: number, matchId: number): Promise<number> {
+  const { cart } = await getJson<{ cart: { items: CartItem[] } | null }>(userId, `/api/matches/${matchId}/cart`);
+  return cart?.items.length ?? 0;
 }

@@ -13,6 +13,7 @@ export default function SeatGrid({
   blockSeats,
   mineSeatIds,
   pendingSeatIds,
+  atLimit,
   disabled,
   onHold,
   onRelease,
@@ -20,6 +21,7 @@ export default function SeatGrid({
   blockSeats: BlockSeats;
   mineSeatIds: Set<number>;
   pendingSeatIds: Set<number>;
+  atLimit: boolean;
   disabled: boolean;
   onHold: (seatId: number, row: string, number: number) => void;
   onRelease: (seatId: number) => void;
@@ -37,7 +39,9 @@ export default function SeatGrid({
                   : s.status;
               const pending = pendingSeatIds.has(s.id);
               const clickable =
-                !disabled && !pending && (status === "available" || status === "mine");
+                !disabled &&
+                !pending &&
+                (status === "mine" || (status === "available" && !atLimit));
               return (
                 <button
                   key={s.id}
@@ -45,7 +49,7 @@ export default function SeatGrid({
                   disabled={!clickable}
                   data-testid={`seat-${s.id}`}
                   data-status={status}
-                  title={`${row.row}列 ${s.number}番 (${status})`}
+                  title={`${row.row}列 ${s.number}番 (${status})${status === "available" && atLimit ? "（上限）" : ""}`}
                   onClick={() =>
                     status === "mine" ? onRelease(s.id) : onHold(s.id, row.row, s.number)
                   }

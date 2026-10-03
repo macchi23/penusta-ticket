@@ -1,10 +1,10 @@
 "use server";
 
 import { refresh } from "next/cache";
-import type { ActionResult, CartResponse } from "@/lib/api";
+import type { ActionResult, CartResponse, UnreservedQuantity } from "@/lib/api";
 import { apiCall } from "@/lib/server-api";
 
-const REFRESH_ON_ERROR = ["seat_unavailable", "sold_out", "cart_expired"];
+const REFRESH_ON_ERROR = ["seat_unavailable", "sold_out", "cart_expired", "cart_limit_reached"];
 
 function isId(n: unknown): n is number {
   return typeof n === "number" && Number.isSafeInteger(n) && n > 0;
@@ -29,9 +29,22 @@ export async function holdSeat(matchId: number, seatId: number) {
   return run("POST", `/api/matches/${matchId}/cart/items`, { seat_id: seatId });
 }
 
-export async function holdUnreserved(matchId: number, blockId: number) {
+export async function setUnreservedQuantities(
+  matchId: number,
+  blockId: number,
+  quantities: UnreservedQuantity[],
+) {
   if (!isId(matchId) || !isId(blockId)) return invalid();
-  return run("POST", `/api/matches/${matchId}/cart/items`, { block_id: blockId });
+  if (!Array.isArray(quantities) || quantities.length < 1 || quantities.length > 10) return invalid();
+  const seen = new Set<number>();
+  for (const q of quantities) {
+    if (!isId(q?.ticket_type_id) || seen.has(q.ticket_type_id)) return invalid();
+    seen.add(q.ticket_type_id);
+    if (!Number.isSafeInteger(q.quantity) || q.quantity < 0) return invalid();
+  }
+  return run("PUT", `/api/matches/${matchId}/cart/blocks/${blockId}/items`, {
+    quantities: quantities.map((q) => ({ ticket_type_id: q.ticket_type_id, quantity: q.quantity })),
+  });
 }
 
 export async function releaseItem(matchId: number, itemId: number) {
