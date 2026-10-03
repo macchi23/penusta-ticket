@@ -2,24 +2,23 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Enums\TicketStatus;
 use App\Http\Controllers\Controller;
 use App\Models\Block;
 use App\Models\FootballMatch;
 use App\Models\Ticket;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 
 class BlockController extends Controller
 {
-    /**
-     * 有効（在庫を消費している）とみなすチケットステータス。
-     */
-    private const ACTIVE_TICKET_STATUSES = ['reserved', 'paid', 'issued', 'checked_in'];
-
     public function seats(FootballMatch $match, Block $block): JsonResponse
     {
         if ($block->seating_type !== 'reserved') {
             abort(404);
         }
+
+        $now = CarbonImmutable::now();
 
         $block->load('stand');
 
@@ -31,7 +30,7 @@ class BlockController extends Controller
         $ticketBySeat = Ticket::where('match_id', $match->id)
             ->where('block_id', $block->id)
             ->whereNotNull('seat_id')
-            ->whereIn('status', self::ACTIVE_TICKET_STATUSES)
+            ->consumingInventory($now)
             ->get()
             ->keyBy('seat_id');
 
@@ -43,7 +42,7 @@ class BlockController extends Controller
                     $status = 'available';
 
                     if ($ticket !== null) {
-                        $status = ($ticket->status === 'reserved' && $ticket->expires_at !== null) ? 'held' : 'sold';
+                        $status = $ticket->status === TicketStatus::Held ? 'held' : 'sold';
                     }
 
                     return [

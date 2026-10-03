@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrderStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -17,6 +18,7 @@ class Order extends Model
         'status',
         'total',
         'channel',
+        'expires_at',
         'ordered_at',
     ];
 
@@ -24,7 +26,9 @@ class Order extends Model
     {
         return [
             'total' => 'integer',
-            'ordered_at' => 'datetime',
+            'status' => OrderStatus::class,
+            'expires_at' => 'immutable_datetime',
+            'ordered_at' => 'immutable_datetime',
         ];
     }
 

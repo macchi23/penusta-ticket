@@ -6,16 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Block;
 use App\Models\FootballMatch;
 use App\Models\Ticket;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Carbon;
 
 class MatchController extends Controller
 {
-    /**
-     * 有効（在庫を消費している）とみなすチケットステータス。
-     */
-    private const ACTIVE_TICKET_STATUSES = ['reserved', 'paid', 'issued', 'checked_in'];
-
     public function index(): JsonResponse
     {
         $matches = FootballMatch::with(['homeTeam', 'awayTeam', 'stadium'])
@@ -37,7 +33,7 @@ class MatchController extends Controller
             ->pluck('allocation', 'block_id');
 
         $soldCounts = Ticket::where('match_id', $match->id)
-            ->whereIn('status', self::ACTIVE_TICKET_STATUSES)
+            ->consumingInventory(CarbonImmutable::now())
             ->selectRaw('block_id, count(*) as cnt')
             ->groupBy('block_id')
             ->pluck('cnt', 'block_id');

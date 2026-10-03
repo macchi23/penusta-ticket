@@ -31,6 +31,9 @@
    ブラウザからは `NEXT_PUBLIC_API_URL=http://localhost:8080`。`src/lib/api.ts` の `apiBase()` が出し分ける。
 6. Next.jsは**16.3**。規約が古い知識と違う可能性があるため、書く前に
    `frontend/node_modules/next/dist/docs/` を確認（`PageProps<'/path'>` 等のグローバル型ヘルパーを使う）。
+   キャッシュのガイドは2系統ある。`01-getting-started/08-caching.md` は Cache Components が有効な前提で、
+   このリポジトリ（`next.config.ts` で `cacheComponents` 無効）では `02-guides/caching-without-cache-components.md` を読む。
+   middleware は `src/proxy.ts`（`export function proxy`）に改名されている。
 
 ## ゼロから再構築する手順
 

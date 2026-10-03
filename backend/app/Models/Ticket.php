@@ -2,6 +2,9 @@
 
 namespace App\Models;
 
+use App\Enums\TicketStatus;
+use Carbon\CarbonImmutable;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -23,8 +26,23 @@ class Ticket extends Model
     protected function casts(): array
     {
         return [
-            'expires_at' => 'datetime',
+            'status' => TicketStatus::class,
+            'expires_at' => 'immutable_datetime',
         ];
+    }
+
+    /**
+     * 在庫を消費しているチケット（購入済み、または期限内の仮押さえ）。
+     */
+    public function scopeConsumingInventory(Builder $q, CarbonImmutable $now): void
+    {
+        $q->where(function (Builder $w) use ($now) {
+            $w->where('status', TicketStatus::Paid->value)
+                ->orWhere(function (Builder $h) use ($now) {
+                    $h->where('status', TicketStatus::Held->value)
+                        ->where('expires_at', '>', $now);
+                });
+        });
     }
 
     public function match(): BelongsTo
