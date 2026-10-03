@@ -16,7 +16,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | code-reviewer.md の「`now` をロック取得後に取っているか」は `CheckoutService` だけが守っていて `CartService` 系と食い違う。定義を「新規・変更する経路では」と限定するか、実装を揃える | 1 | 2026-10-04 | 解消（実装を揃えた） |
 | 定義修正 | Explore の返却が「答えを先頭に 1〜3 行」にならず、前置き（「調査完了しました」）+ 見出しと表になった。問いが複数のときの形を定義に書く案 | 2 | 2026-10-03 | 採用 |
 | 定義修正 | implementer.md に Feature テストの定石を足す案: demo guard でユーザーを切り替えるときは `auth()->forgetGuards()`、jsonb の payload 比較は `assertEquals`（キー順が保存されない） | 1 | 2026-10-03 | 候補 |
-| 定義修正 | implementer.md に「複数行の置換は BSD `sed -i` でなく Edit を使う」を足す案（macOS で失敗した。DuckDB 環境の実装でも再発） | 2 | 2026-10-04 | 候補 |
+| 定義修正 | implementer.md に「複数行の置換は BSD `sed -i` でなく Edit を使う」を足す案（macOS で失敗した。DuckDB 環境の実装、合成データ再生成の検証でも再発） | 3 | 2026-10-04 | 候補 |
 | 定義修正 | E2E の定石を implementer.md / code-reviewer.md に足す案: 楽観更新のある UI では「楽観更新で出た／消えた要素」で完了を待たない（hold は対処済みで release で漏れた）。Next の route announcer も `role="alert"` なので alert は文言で絞る | 1 | 2026-10-03 | 候補 |
 | 定義修正 | implementer / code-reviewer が `path` を絶対パスで返した。「リポジトリ相対」と明記する案 | 1 | 2026-10-02 | 候補 |
 | check | `scripts/check.sh` に静的解析（larastan）を足す。`use Throwable` 漏れで catch が何も捕まえないバグを pint がすり抜け、レビューで検出 | 1 | 2026-10-04 | 候補 |
@@ -24,3 +24,6 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | implementer.md に「timestamptz との比較で Carbon をそのままバインドしない（オフセットが落ちる）」を足す案。ブリーフで注意しても初回実装でそのまま渡した。接続 TZ を UTC に固定して実害は解消済み | 1 | 2026-10-04 | 候補 |
 | skill | `/dea-note`: タスク完了時に `docs/dea-notes.md` へ論点を追記する手順（見出しの形式を固定） | 0 | - | 候補 |
 | 定義修正 | implementer.md に「失敗確認のための一時変更は `git stash` / コピーで行い、戻した後に `git diff` で差分を確認して返却に書く」を足す案。build.sql の一時破壊を戻し損ね（`AS` が消えた）、返却では「元へ戻した」と報告した | 1 | 2026-10-04 | 候補 |
+| hook / skill | compose の全イメージが pull できるかの定期確認（`docker manifest inspect`）。タグ無しの `minio/minio` が Docker Hub から削除されていたのに、手元のキャッシュで動いて気づけなかった | 1 | 2026-10-04 | 候補 |
+| 定義修正 | researcher.md に「`--rm`・ポート公開なし・ボリュームなしの使い捨てコンテナとテスト用イメージの pull は検証に使ってよい」を明記する案（MinIO 代替の検証で使用。DuckDB の件と同じ論点なので上の行とまとめてよい） | 1 | 2026-10-04 | 候補 |
+| 定義修正 | 生成器を変更するブリーフに「mt_rand の呼び出し回数・順序・幅を変えない」制約と、再生成前後の指紋照合を完了条件に入れる（今回は researcher の提案で実施し、全項目一致） | 1 | 2026-10-04 | 候補 |

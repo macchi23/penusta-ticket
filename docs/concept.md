@@ -22,7 +22,7 @@
    割当・緩衝帯は「試合×ブロックへの属性」として設定テーブルで表現する。
 2. **イベントログを最初から吐く**: 閲覧/カート/購入/入場を events に append-only 記録。
    分析遊びの原資。エクスポートは S3 互換形式（JSON Lines/Parquet + Hive パーティション
-   `dt=YYYY-MM-DD/`）で MinIO へ。実 AWS へは同じファイルを sync するだけで移行可能。
+   `dt=YYYY-MM-DD/`）で S3 互換ストレージ（ローカルは RustFS）へ。実 AWS へは同じファイルを sync するだけで移行可能。
 3. **販売方式は Strategy として差し替え可能に**: sale_phases の method で表現。
 4. **合成データはシナリオ付き生成器**: 一様乱数でなく分布ルールを仕込む
    （ゴール裏=20-40代男性多め、ビッグマッチは先行完売、等）。分析すると「答えが出る」データにする。
@@ -46,7 +46,7 @@
 - [ ] 管理画面: 割当・緩衝帯エディタ
 - [ ] 販売フェーズ（年パス先行/FC 先行/一般）と資格判定
 - [ ] 抽選販売、waiting room（Redis/キュー）
-- [x] イベントログの MinIO エクスポート → DuckDB ローカル分析（`events:export` + `scripts/analytics.sh`）
+- [x] イベントログの S3 互換ストレージ（RustFS）へのエクスポート → DuckDB ローカル分析（`events:export` + `scripts/analytics.sh`）
   - [ ] dbt によるモデリング
 - [ ] 実 S3 + Glue/Athena パイプライン（DEA 対策）
   - リージョンは us-east-1 か us-west-2（レイテンシ不問、単価が安く新機能が早い）。常時課金のサービス（MWAA、EMR、Redshift プロビジョンド）は使わない

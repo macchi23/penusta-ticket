@@ -4,18 +4,18 @@
 
 ## 現状
 
-docker compose 7サービス（app/web/frontend/db/redis/minio/mailpit）で、
+docker compose 7サービス（app/web/frontend/db/redis/rustfs/mailpit）+ profile 付きの analytics（DuckDB）/ aws（aws CLI）で、
 試合一覧 → 座席図 → 席クリックで仮押さえ → 購入手続き → 決済モック → 完了、まで動く。
 購入フローは DB だけで動く骨格（`docs/concept.md` の設計方針 3 の差し替え点は具象クラス 1 つずつ）。
 
 - フロント: http://localhost:3100 （**3000ではない**。他プロジェクトのdevサーバーと衝突するため3100に変更済み）
-- API: http://localhost:8080 、mailpit: :8025 、MinIOコンソール: :9001
+- API: http://localhost:8080 、mailpit: :8025 、RustFS コンソール: :9001/rustfs/console/
 - 公開ポートはすべて `127.0.0.1` に束縛している（同じ LAN から認証なしの API に届かないように）
 - 認証は無い。開発用の「ユーザー切替」（画面上部のバー）で合成ユーザーになりきる。
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
 - 投入済みデータ: 10試合 / 指定席3,200席+自由席8ブロック / ユーザー2,000 / 注文2.2万 / チケット4.8万 / イベント20万
-- events は `events:export` で MinIO に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
+- events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
 
 ## 環境の注意点（ハマりどころ）
 
@@ -56,8 +56,8 @@ docker compose up -d --build
 docker compose exec app php artisan key:generate      # 初回のみ（.envはbackend/.env.exampleからコピー）
 docker compose exec app php artisan migrate:fresh --seed --force
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data
-# MinIOバケット（初回のみ）。mc alias はコンテナ再作成で消えるので環境変数で認証する
-docker compose exec -e MC_HOST_lake=http://penusta:penusta-secret@localhost:9000 minio mc mb -p lake/penusta-events
+# S3 バケット（初回のみ）。aws CLI コンテナは compose の環境変数で RustFS を向く
+docker compose --profile tools run --rm -T aws s3 mb s3://penusta-events
 # イベントログのエクスポートと分析用 DB（任意）
 docker compose exec app php artisan events:export --from=2025-12-06 --to=2026-11-21
 scripts/analytics.sh build
@@ -70,7 +70,8 @@ scripts/analytics.sh build
 - 座席図のAPI契約は `frontend/src/lib/api.ts` の型が正（バックエンドはこれに合わせる）
 - 割当テンプレートは試合作成時に `match_block_allocations` へコピー展開（AllocationSeeder参照）。
   緩衝帯いじりはこのテーブルを更新すればフロントに即反映される
-- 合成データの分布ルールは `app/Console/Commands/GenerateDemoData.php`。mt_srand(42)で再現可能
+- 合成データの分布ルールは `app/Console/Commands/GenerateDemoData.php`。mt_srand(42)で再現可能（mt_rand 由来の値のみ。uuid・ID・created_at は
+  実行ごとに変わる）。生成器を直すときは mt_rand の呼び出し回数・順序・幅（max − min）を変えなければ後続の生成は同じ値になる
 
 ## 検証用クエリ（分析遊びの入口）
 
@@ -107,13 +108,12 @@ scripts/analytics.sh shell     # DuckDB の対話モード
   - ファイルに dt 列は入れない（Athena でパーティション列と重複するとエラー）。実 S3 へは `aws s3 sync` で同じ形のまま移せる
 - E2E 由来（`session_id LIKE 'e2e00000-0000-4000-8000-%'`、`e2e/lib/session.ts` の固定部分）と `session_id = 'unknown'` は raw には残し、
   DuckDB の `events_clean` ビューで除外する。`'e2e0%'` だと合成データの UUID が偶然一致したセッション（1 件）まで消える
-- DuckDB は compose の `analytics` サービス（`duckdb/duckdb:1.5.6`、profile `analytics`）。MinIO へは `minio:9000`。
+- DuckDB は compose の `analytics` サービス（`duckdb/duckdb:1.5.6`、profile `analytics`）。RustFS へは `rustfs:9000`。
   シークレットは `analytics/setup.sql` で毎回一時作成（PERSISTENT は平文でディスクに残るので使わない）。TimeZone は UTC に固定
 - 非対話の `docker compose run` は `-T` が要る（無いと `-c` が compose のフラグとして解釈される）。イメージは distroless でシェルが無い
 - `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
-- ファネル（2026-10-04 時点）: (session_id, match_id) 単位で view_match 89,766 → view_seatmap 56,162 → add_to_cart 35,972 →
-  purchase 22,442（順序不問）。順序つき（各ステップが前ステップ以降）は合成データの時刻オフセットが
-  重なっているため少なく出る（下の申し送り）
+- ファネル（2026-10-04 再生成後）: (session_id, match_id) 単位で view_match 89,764 → view_seatmap 56,160 → add_to_cart 35,970 →
+  purchase 22,441。合成データの購入セッションは時刻順に並ぶので、順序つき到達も 22,441（順序不問と一致）
 - スケジュール登録はしていない（下の申し送り: scheduler が動いていない）
 
 ## 購入フローの構造（2026-10-03）
@@ -168,10 +168,14 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 - **scheduler が動いていない**: compose にも Dockerfile にも `schedule:work` / cron が無く、`routes/console.php` の
   `tickets:expire-holds`（everyMinute）は自動実行されていない（期限切れの判定は各リクエストで行うので販売は壊れないが、行の回収は手動）。
   scheduler サービスを足すときに `events:export`（前日分を毎日）も登録する
-- `minio/minio` イメージは 2025-10 以降 Docker Hub で更新が止まったという報告がある（手元は 2025-09-07 版）。
-  ゼロから再構築して pull に失敗したら代替イメージを検討する（未確認）
-- 合成データ生成器（`GenerateDemoData.php:450-452`）の時刻オフセットが重なっている（view_match 8〜25 分前、view_seatmap 4〜15 分前、
-  add_to_cart 1〜6 分前）。4 ステップ到達 22,442 のうち時刻順は約 8 割。順序つきファネルを主指標にするなら生成器を直す
+- S3 互換ストレージは MinIO から RustFS（`rustfs/rustfs:1.0.1`、Apache-2.0）に置き換えた（2026-10-04）。`minio/minio` と `minio/mc` は
+  Docker Hub から削除され、quay.io も匿名 pull 不可で、ゼロから再構築できなくなっていた（GitHub の minio/minio も archived）。
+  mc の代わりに aws CLI コンテナ（profile `tools`）を使う。イメージはタグ + digest で固定。タグ無しのイメージ（`axllent/mailpit` 等）は
+  手元のキャッシュで動いてしまい配布終了に気づけないので、ゼロから再構築するときに確かめる。旧 `minio-data` ボリュームは未削除。
+  minio コンテナが残っている環境では 9000/9001 が塞がるので、`docker compose up -d --remove-orphans` で旧コンテナを片付ける
+- 合成データの購入セッションは、各ステップを前ステップの 1〜18 / 1〜12 / 1〜6 分後に積み上げる（2026-10-04 修正、旧実装は購入時刻からの
+  独立オフセットで順序が約 2 割逆転していた）。実アプリの view_match → view_seatmap は数秒差なので、分単位の間隔はまだ長め。
+  秒単位にすると乱数の呼び出しが変わり orders 以降の合成データがすべて変わる
 - pint は `use` 漏れを検出しない（`catch (Throwable)` が名前空間内のクラスを指して何も捕まえないバグをレビューで検出）。
   静的解析（larastan）を `scripts/check.sh` に足す候補
 

@@ -126,7 +126,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「ジョブが 1 つのタスクだけで遅い」「大きな gzip ファイル」→ ファイル分割 or 分割可能な形式
 
 **採らなかった選択肢**
-- 非圧縮の JSON Lines: MinIO のコンソールで中身を見やすいだけ。スキャン量・保存量で不利
+- 非圧縮の JSON Lines: ストレージのコンソールで中身を見やすいだけ。スキャン量・保存量で不利
 
 ## 5. ファイルサイズ（small files 問題）
 
@@ -238,7 +238,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - curated の作り直しは「プレフィックスを消す → 書く」で、その間に読むと欠けたデータが見える（ローカルの遊びなので許容）
-- DuckDB の S3 へのパーティション書き込みは上書き（OVERWRITE）に対応していないため、先に `mc rm` で消している
+- DuckDB の S3 へのパーティション書き込みは上書き（OVERWRITE）に対応していないため、先に `aws s3 rm` で消している
 - ロードマップ: 実 AWS で curated を Iceberg テーブル化する（Glue Data Catalog + Athena）
 
 **AWS での対応**
@@ -295,7 +295,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - DuckDB の S3 シークレットは毎回一時的に作る（`CREATE SECRET`）。`CREATE PERSISTENT SECRET` は平文でディスクに保存されるので使わない
-- 認証情報はローカル開発用の固定値（MinIO のルートユーザー）
+- 認証情報はローカル開発用の固定値（RustFS のアクセスキー）
 
 **AWS での対応**
 - 実行環境（Glue ジョブ、Lambda、EC2、ECS）には IAM ロールを付け、アクセスキーを埋め込まない

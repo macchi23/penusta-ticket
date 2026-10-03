@@ -8,7 +8,7 @@
 - `backend/` — Laravel 13 (API)
 - `frontend/` — Next.js 16.3 (App Router / TypeScript)
 - `docker/` — php-fpm / nginx 設定
-- PostgreSQL 17 / Redis / MinIO / mailpit
+- PostgreSQL 17 / Redis / RustFS（S3 互換） / mailpit
 
 ## 起動
 
@@ -25,4 +25,4 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
 | http://localhost:3100 | フロントエンド |
 | http://localhost:8080 | API |
 | http://localhost:8025 | mailpit |
-| http://localhost:9001 | MinIO console |
+| http://localhost:9001/rustfs/console/ | RustFS console |
