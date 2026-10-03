@@ -56,17 +56,38 @@ services:
     ports:
       - "127.0.0.1:6379:6379"
 
-  minio:
-    image: minio/minio
-    command: server /data --console-address ":9001"
+  # minio/minio は配布終了のため RustFS に置き換えた
+  rustfs:
+    image: rustfs/rustfs:1.0.1@sha256:1803faef57627e2d9c2e7d89d655d712ddded5389040054987163043fecb6a3c
     ports:
       - "127.0.0.1:9000:9000"
       - "127.0.0.1:9001:9001"
     environment:
-      MINIO_ROOT_USER: penusta
-      MINIO_ROOT_PASSWORD: penusta-secret
+      RUSTFS_ACCESS_KEY: penusta
+      RUSTFS_SECRET_KEY: penusta-secret
+      RUSTFS_VOLUMES: /data
+      RUSTFS_ADDRESS: ":9000"
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_CONSOLE_ADDRESS: ":9001"
     volumes:
-      - minio-data:/data
+      - rustfs-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  aws:
+    image: amazon/aws-cli:2.37.9@sha256:92de75724b6a746951f0e8b915d86bbccd7cb55aff96cd0cb4f7017272160780
+    profiles: ["tools"]
+    environment:
+      AWS_ACCESS_KEY_ID: penusta
+      AWS_SECRET_ACCESS_KEY: penusta-secret
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ENDPOINT_URL: http://rustfs:9000
+    depends_on:
+      rustfs:
+        condition: service_healthy
 
   analytics:
     image: duckdb/duckdb:1.5.6
@@ -76,7 +97,8 @@ services:
       - ./analytics:/workspace
       - duckdb-ext:/duckdb-ext
     depends_on:
-      - minio
+      rustfs:
+        condition: service_healthy
 
   mailpit:
     image: axllent/mailpit
@@ -87,5 +109,6 @@ services:
 volumes:
   pgdata:
   minio-data:
+  rustfs-data:
   frontend-node-modules:
   duckdb-ext:
