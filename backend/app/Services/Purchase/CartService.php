@@ -29,29 +29,30 @@ class CartService
     ) {}
 
     /**
-     * 現在の pending カート。無い / 期限切れなら null（期限切れは回収する）。
+     * 現在の pending カート。無い / 期限切れなら cart が null（期限切れは回収する）。
      */
-    public function current(User $user, FootballMatch $match, CarbonImmutable $now): ?Order
+    public function current(User $user, FootballMatch $match): CurrentCart
     {
-        return DB::transaction(function () use ($user, $match, $now) {
+        return DB::transaction(function () use ($user, $match) {
             $cart = $this->lockPending($user, $match);
-            if ($cart === null) {
-                return null;
-            }
-            if ($this->isExpired($cart, $now)) {
+            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+            if ($cart !== null && $this->isExpired($cart, $now)) {
                 $this->holdExpiry->expireCart($cart->id, $now);
-
-                return null;
+                $cart = null;
             }
 
-            return $cart;
+            return new CurrentCart($cart, $now);
         }, 3);
     }
 
-    public function addItem(User $user, FootballMatch $match, ?int $seatId, ?int $blockId, ?int $ticketTypeId, CarbonImmutable $now): CartChange
+    public function addItem(User $user, FootballMatch $match, ?int $seatId, ?int $blockId, ?int $ticketTypeId): CartChange
     {
-        return DB::transaction(function () use ($user, $match, $seatId, $blockId, $ticketTypeId, $now) {
-            $cart = $this->lockOrCreate($user, $match, $now);
+        return DB::transaction(function () use ($user, $match, $seatId, $blockId, $ticketTypeId) {
+            $locked = $this->lockPending($user, $match);
+            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+            $cart = $this->ensureCart($locked, $user, $match, $now);
 
             $type = $ticketTypeId !== null
                 ? TicketType::findOrFail($ticketTypeId)
@@ -67,7 +68,7 @@ class CartService
 
                 $alreadyHeld = $this->liveTickets($cart, $now)->where('seat_id', $seat->id)->exists();
                 if ($alreadyHeld) {
-                    return new CartChange($cart, false, $block, $seat->id);
+                    return new CartChange($cart, $now, false, $block, $seat->id);
                 }
                 if ($block->seating_type !== 'reserved') {
                     throw PurchaseException::notOnSale();
@@ -105,7 +106,7 @@ class CartService
             ]);
             $this->refreshTotal($cart, $now);
 
-            return new CartChange($cart, true, $block, $seat?->id);
+            return new CartChange($cart, $now, true, $block, $seat?->id);
         }, 3);
     }
 
@@ -114,9 +115,9 @@ class CartService
      *
      * @param  array<int, array{ticket_type_id: int, quantity: int}>  $quantities
      */
-    public function setUnreservedQuantities(User $user, FootballMatch $match, Block $block, array $quantities, CarbonImmutable $now): CartChange
+    public function setUnreservedQuantities(User $user, FootballMatch $match, Block $block, array $quantities): CartChange
     {
-        return DB::transaction(function () use ($user, $match, $block, $quantities, $now) {
+        return DB::transaction(function () use ($user, $match, $block, $quantities) {
             if ($block->seating_type !== 'unreserved') {
                 throw PurchaseException::notOnSale();
             }
@@ -132,7 +133,10 @@ class CartService
                 $wanted[] = [$type, (int) $row['quantity'], $this->priceFor($match, $block, $type)];
             }
 
-            $cart = $this->lockOrCreate($user, $match, $now);
+            $locked = $this->lockPending($user, $match);
+            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+            $cart = $this->ensureCart($locked, $user, $match, $now);
 
             $blockItems = OrderItem::with('ticket')
                 ->where('order_id', $cart->id)
@@ -187,14 +191,17 @@ class CartService
             }
             $this->refreshTotal($cart, $now);
 
-            return new CartChange($cart, $addTotal + $released > 0, $block, null, $addTotal, $released);
+            return new CartChange($cart, $now, $addTotal + $released > 0, $block, null, $addTotal, $released);
         }, 3);
     }
 
-    public function changeTicketType(User $user, FootballMatch $match, int $itemId, int $ticketTypeId, CarbonImmutable $now): CartChange
+    public function changeTicketType(User $user, FootballMatch $match, int $itemId, int $ticketTypeId): CartChange
     {
-        $change = DB::transaction(function () use ($user, $match, $itemId, $ticketTypeId, $now) {
-            $locked = $this->lockCartItem($user, $match, $itemId, $now);
+        $change = DB::transaction(function () use ($user, $match, $itemId, $ticketTypeId) {
+            $cart = $this->lockPending($user, $match);
+            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+            $locked = $this->findCartItem($cart, $itemId, $now);
             if ($locked === null) {
                 return null;
             }
@@ -218,16 +225,19 @@ class CartService
             $item->save();
             $this->refreshTotal($cart, $now);
 
-            return new CartChange($cart, true, $block, $ticket->seat_id);
+            return new CartChange($cart, $now, true, $block, $ticket->seat_id);
         }, 3);
 
         return $change ?? throw new ModelNotFoundException;
     }
 
-    public function removeItem(User $user, FootballMatch $match, int $itemId, CarbonImmutable $now): CartChange
+    public function removeItem(User $user, FootballMatch $match, int $itemId): CartChange
     {
-        $change = DB::transaction(function () use ($user, $match, $itemId, $now) {
-            $locked = $this->lockCartItem($user, $match, $itemId, $now);
+        $change = DB::transaction(function () use ($user, $match, $itemId) {
+            $cart = $this->lockPending($user, $match);
+            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+            $locked = $this->findCartItem($cart, $itemId, $now);
             if ($locked === null) {
                 return null;
             }
@@ -241,7 +251,7 @@ class CartService
             }
             $this->refreshTotal($cart, $now);
 
-            return new CartChange($cart, $changed, $ticket->block, $ticket->seat_id);
+            return new CartChange($cart, $now, $changed, $ticket->block, $ticket->seat_id);
         }, 3);
 
         return $change ?? throw new ModelNotFoundException;
@@ -292,10 +302,8 @@ class CartService
             ->first();
     }
 
-    private function lockOrCreate(User $user, FootballMatch $match, CarbonImmutable $now): Order
+    private function ensureCart(?Order $cart, User $user, FootballMatch $match, CarbonImmutable $now): Order
     {
-        $cart = $this->lockPending($user, $match);
-
         if ($cart !== null && $this->isExpired($cart, $now)) {
             $this->holdExpiry->expireCart($cart->id, $now);
             $cart = null;
@@ -323,9 +331,8 @@ class CartService
      *
      * @return array{0: Order, 1: OrderItem}|null
      */
-    private function lockCartItem(User $user, FootballMatch $match, int $itemId, CarbonImmutable $now): ?array
+    private function findCartItem(?Order $cart, int $itemId, CarbonImmutable $now): ?array
     {
-        $cart = $this->lockPending($user, $match);
         if ($cart === null) {
             return null;
         }

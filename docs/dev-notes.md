@@ -122,9 +122,9 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
   条件は `FirstComeSaleMethod::assertSellable` に足せばよい
 - 本番相当の設定（`APP_ENV=production`、`DEMO_AUTH_ENABLED=false`）で demo guard と `/api/demo/*` が閉じることはテストで確認済み。
   本物の認証は `auth:demo` を `auth:sanctum` に書き換えるのが入口
-- 「`now` はロック取得後に取る」を守っているのは `CheckoutService` だけ。`CartService` 系はコントローラで取った `now` をトランザクションに
-  渡している（ロック待ちの間に期限が過ぎても期限内として扱う窓がある。影響は仮押さえの可否判定だけで、二重販売にはならない）。
-  `CartService` も同じ流儀に揃えるのが課題
+- `now` はロック取得後に取る（`CheckoutService` / `CartService` とも）。サービスが使った `now` を戻り値（`CheckoutResult` / `CartChange` /
+  `CurrentCart`）で返し、コントローラはレスポンスとイベント記録にそれを使う。テストは `CartTest::expireAfterFirstLock()`（最初の
+  `for update` の直後に時刻を期限後へ進める）で、ロック前に `now` を取る退行を検出する
 - 「同じトランザクション内で解放してから取り直す」処理は仮押さえの延長に化けやすい（`setUnreservedQuantities` で一度出て修正済み）。
   今後 Redis 版などを作るときも、期限の付け直しは「操作前に有効な held が 0 件」の条件で判定する
 

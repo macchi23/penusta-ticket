@@ -349,6 +349,85 @@ class CartTest extends TestCase
         $this->assertCount(1, $res->json('cart.items'));
     }
 
+    /** 最初の `for update` クエリの直後に、時刻を期限後へ 1 回だけ進める（ロック待ちの間に期限が過ぎた状況）。 */
+    private function expireAfterFirstLock(): void
+    {
+        $fired = false;
+        DB::listen(function ($query) use (&$fired) {
+            if (! $fired && str_contains(strtolower($query->sql), 'for update')) {
+                $fired = true;
+                $this->travelTo(Carbon::parse('2026-06-01 00:10:00', 'UTC'));
+            }
+        });
+    }
+
+    public function test_get_cart_uses_time_taken_after_lock(): void
+    {
+        $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        $this->expireAfterFirstLock();
+        $this->getJson($this->url(), $this->h($this->alice))
+            ->assertOk()->assertJsonPath('cart', null);
+
+        $this->assertSame('expired', Order::firstOrFail()->status->value);
+    }
+
+    public function test_delete_uses_time_taken_after_lock(): void
+    {
+        $res = $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $itemId = $res->json('cart.items.0.id');
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        $this->expireAfterFirstLock();
+        $this->deleteJson($this->url("/items/{$itemId}"), [], $this->h($this->alice))->assertStatus(404);
+
+        $this->assertSame('expired', Order::firstOrFail()->status->value);
+    }
+
+    public function test_add_item_uses_time_taken_after_lock(): void
+    {
+        $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $oldOrder = Order::firstOrFail();
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        $this->expireAfterFirstLock();
+        $res = $this->add($this->alice, ['seat_id' => $this->seats[2]->id])->assertCreated();
+
+        $this->assertNotSame($oldOrder->id, $res->json('cart.id'));
+        $this->assertSame('expired', $oldOrder->fresh()->status->value);
+        $this->assertSame(1, Order::where('status', 'pending')->count());
+    }
+
+    public function test_set_quantities_uses_time_taken_after_lock(): void
+    {
+        $block = $this->bigFree(10);
+        $this->setQty($this->alice, $block, [[$this->adult->id, 1]])->assertOk();
+        $oldOrder = Order::firstOrFail();
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        $this->expireAfterFirstLock();
+        $res = $this->setQty($this->alice, $block, [[$this->adult->id, 2]])->assertOk();
+
+        $this->assertNotSame($oldOrder->id, $res->json('cart.id'));
+        $this->assertSame('expired', $oldOrder->fresh()->status->value);
+        $this->assertSame(1, Order::where('status', 'pending')->count());
+    }
+
+    public function test_change_ticket_type_uses_time_taken_after_lock(): void
+    {
+        $res = $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
+        $itemId = $res->json('cart.items.0.id');
+        $oldOrder = Order::firstOrFail();
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        $this->expireAfterFirstLock();
+        $this->patchJson($this->url("/items/{$itemId}"), ['ticket_type_id' => $this->child->id], $this->h($this->alice))
+            ->assertStatus(404);
+
+        $this->assertSame('expired', $oldOrder->fresh()->status->value);
+    }
+
     public function test_expiry_is_reset_only_when_cart_has_no_live_held(): void
     {
         $first = $this->add($this->alice, ['seat_id' => $this->seats[1]->id])->assertCreated();
