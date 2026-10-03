@@ -4,6 +4,7 @@ import type { BlockSeats, CartResponse, MatchPrice, SeatMap } from "@/lib/api";
 import { ApiHttpError, apiGet } from "@/lib/server-api";
 import MatchPurchase from "@/components/MatchPurchase";
 import AutoRefresh from "@/components/AutoRefresh";
+import ViewTracker from "@/components/ViewTracker";
 
 type Settled<T> = { ok: true; data: T } | { ok: false; status: number };
 
@@ -87,6 +88,7 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
         blockSeats={blockSeats}
       />
       <AutoRefresh />
+      <ViewTracker matchId={match.id} blockCode={selectedBlock?.code} />
     </main>
   );
 }

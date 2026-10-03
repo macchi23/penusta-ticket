@@ -7,6 +7,12 @@ return [
     // カート操作のレート制限（1 ユーザーあたり、1 分間の回数）
     'cart_rate_per_minute' => (int) env('TICKETING_CART_RATE_PER_MINUTE', 60),
 
+    // 閲覧イベント記録のレート制限（IP + セッションあたり、1 分間の回数）
+    'events_rate_per_minute' => (int) env('TICKETING_EVENTS_RATE_PER_MINUTE', 120),
+
+    // 閲覧イベント記録の IP 単位のレート制限（1 分間の回数）。Next 経由では全利用者が同じ IP になるため高め
+    'events_rate_per_minute_ip' => (int) env('TICKETING_EVENTS_RATE_PER_MINUTE_IP', 600),
+
     // 1 注文あたりの最大枚数
     'max_tickets_per_order' => (int) env('TICKETING_MAX_TICKETS_PER_ORDER', 6),
 

@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\Api\ActivityEventController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CartController;
 use App\Http\Controllers\Api\CheckoutController;
@@ -29,6 +30,9 @@ Route::post('/orders/{order}/checkout', [CheckoutController::class, 'store'])
     ->middleware(['auth:demo', 'throttle:cart'])->whereNumber('order');
 Route::get('/orders/{order}', [OrderController::class, 'show'])
     ->middleware('auth:demo')->whereNumber('order');
+
+// 任意認証（ログインしていれば user_id を記録する）
+Route::post('/events', [ActivityEventController::class, 'store'])->middleware('throttle:events');
 
 Route::get('/me', [DemoUserController::class, 'me'])->middleware('auth:demo');
 if (DemoUserController::demoEnabled()) {

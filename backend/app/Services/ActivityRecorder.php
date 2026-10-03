@@ -9,6 +9,8 @@ use Illuminate\Http\Request;
 
 class ActivityRecorder
 {
+    public const SESSION_ID_PATTERN = '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i';
+
     public function record(string $type, Request $request, ?User $user, array $payload, CarbonImmutable $now): ActivityEvent
     {
         return ActivityEvent::create([
@@ -25,7 +27,7 @@ class ActivityRecorder
     {
         $id = $request->header('X-Session-Id');
 
-        return is_string($id) && preg_match('/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i', $id)
+        return is_string($id) && preg_match(self::SESSION_ID_PATTERN, $id)
             ? $id
             : 'unknown';
     }
