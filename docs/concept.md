@@ -46,7 +46,10 @@
 - [ ] 管理画面: 割当・緩衝帯エディタ
 - [ ] 販売フェーズ（年パス先行/FC 先行/一般）と資格判定
 - [ ] 抽選販売、waiting room（Redis/キュー）
-- [ ] イベントログの MinIO エクスポート → DuckDB/dbt ローカル分析
+- [x] イベントログの MinIO エクスポート → DuckDB ローカル分析（`events:export` + `scripts/analytics.sh`）
+  - [ ] dbt によるモデリング
 - [ ] 実 S3 + Glue/Athena パイプライン（DEA 対策）
+  - リージョンは us-east-1 か us-west-2（レイテンシ不問、単価が安く新機能が早い）。常時課金のサービス（MWAA、EMR、Redshift プロビジョンド）は使わない
+  - curated を Iceberg テーブル化（Glue Data Catalog + Athena）。アトミックな上書き、タイムトラベル、`MERGE INTO` / `OPTIMIZE` / `VACUUM`
 - [ ] 需要予測・動的価格（MLA 対策）
 - [ ] QR 入場・入場実績データ

@@ -1,6 +1,6 @@
 # 開発メモ（引き継ぎ）
 
-最終更新: 2026-10-03（購入フローの骨格完了時点）
+最終更新: 2026-10-04（イベントログのエクスポートと DuckDB 分析を追加）
 
 ## 現状
 
@@ -15,6 +15,7 @@ docker compose 7サービス（app/web/frontend/db/redis/minio/mailpit）で、
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
 - 投入済みデータ: 10試合 / 指定席3,200席+自由席8ブロック / ユーザー2,000 / 注文2.2万 / チケット4.8万 / イベント20万
+- events は `events:export` で MinIO に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
 
 ## 環境の注意点（ハマりどころ）
 
@@ -29,6 +30,8 @@ docker compose 7サービス（app/web/frontend/db/redis/minio/mailpit）で、
    `Carbon::parse($date, 'Asia/Tokyo')->...->utc()` と明示変換してから保存すること。
    表示側（フロント）は `toLocaleString(..., { timeZone: "Asia/Tokyo" })` で変換済み。
    ※Laravelはdatetime保存時にタイムゾーン変換しないため、変換を忘れると9時間ずれる（初回に踏んだ）。
+   クエリに Carbon をバインドすると `Y-m-d H:i:s` に整形されオフセットが落ちる。timestamptz との比較は DB セッションの
+   TimeZone で解釈されるため、pgsql 接続に `'timezone' => 'UTC'` を設定して固定している（`config/database.php`）。
 4. **frontendのnode_modulesはコンテナ専用ボリューム**（darwin/linuxのバイナリ差回避）。
    ホスト側node_modulesはIDE用。パッケージ追加はホストで `npm install` + コンテナ再作成
    （`docker compose up -d --force-recreate frontend`）が確実。
@@ -53,8 +56,11 @@ docker compose up -d --build
 docker compose exec app php artisan key:generate      # 初回のみ（.envはbackend/.env.exampleからコピー）
 docker compose exec app php artisan migrate:fresh --seed --force
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data
-# MinIOバケット（初回のみ）
-docker exec penusta-ticket-minio-1 sh -c "mc alias set local http://localhost:9000 penusta penusta-secret && mc mb -p local/penusta-events"
+# MinIOバケット（初回のみ）。mc alias はコンテナ再作成で消えるので環境変数で認証する
+docker compose exec -e MC_HOST_lake=http://penusta:penusta-secret@localhost:9000 minio mc mb -p lake/penusta-events
+# イベントログのエクスポートと分析用 DB（任意）
+docker compose exec app php artisan events:export --from=2025-12-06 --to=2026-11-21
+scripts/analytics.sh build
 ```
 
 ## コード配置の要点
@@ -81,6 +87,35 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
 期待値: ゴール裏（北）= 平均39歳・男性71%、メイン = 平均51歳。
 ビッグマッチ（opponent_popularity=5 の2試合）は大規模アウェー配置（S1,S2=away, S3=buffer）。
 
+ここは tickets / orders / users を Postgres で直接見る整合確認用。events 由来の分析（ファネル等）は `analytics/`（DuckDB）に置く。
+
+## イベントログのエクスポートと分析（2026-10-04）
+
+```bash
+docker compose exec app php artisan events:export                      # 前日（UTC）分
+docker compose exec app php artisan events:export --date=2026-08-23
+docker compose exec app php artisan events:export --from=2025-12-06 --to=2026-11-21   # 全期間（合成データの範囲）
+scripts/analytics.sh build     # raw → analytics/penusta.duckdb（events / events_clean）→ 成功したら curated を消して Parquet を書き直す
+scripts/analytics.sh funnel    # 試合別ファネル（analytics/queries/funnel_by_match.sql）
+scripts/analytics.sh shell     # DuckDB の対話モード
+```
+
+- レイアウト（バケット `penusta-events`）:
+  - `raw/events/dt=YYYY-MM-DD/part-0000.jsonl.gz`: `events:export` が書く gzip JSON Lines。dt は occurred_at の **UTC** 日付。
+    1 dt = 1 ファイル。再実行すると固定キーを上書きし、同じ dt 配下の他キーを消す（二重にならない）
+  - `curated/events/dt=YYYY-MM-DD/part-0.parquet`: DuckDB が raw から作る。build のたびに作り直す
+  - ファイルに dt 列は入れない（Athena でパーティション列と重複するとエラー）。実 S3 へは `aws s3 sync` で同じ形のまま移せる
+- E2E 由来（`session_id LIKE 'e2e00000-0000-4000-8000-%'`、`e2e/lib/session.ts` の固定部分）と `session_id = 'unknown'` は raw には残し、
+  DuckDB の `events_clean` ビューで除外する。`'e2e0%'` だと合成データの UUID が偶然一致したセッション（1 件）まで消える
+- DuckDB は compose の `analytics` サービス（`duckdb/duckdb:1.5.6`、profile `analytics`）。MinIO へは `minio:9000`。
+  シークレットは `analytics/setup.sql` で毎回一時作成（PERSISTENT は平文でディスクに残るので使わない）。TimeZone は UTC に固定
+- 非対話の `docker compose run` は `-T` が要る（無いと `-c` が compose のフラグとして解釈される）。イメージは distroless でシェルが無い
+- `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
+- ファネル（2026-10-04 時点）: (session_id, match_id) 単位で view_match 89,766 → view_seatmap 56,162 → add_to_cart 35,972 →
+  purchase 22,442（順序不問）。順序つき（各ステップが前ステップ以降）は合成データの時刻オフセットが
+  重なっているため少なく出る（下の申し送り）
+- スケジュール登録はしていない（下の申し送り: scheduler が動いていない）
+
 ## 購入フローの構造（2026-10-03）
 
 - カート = `orders.status='pending'` の行（ユーザー × 試合で 1 つ、部分ユニーク）。席 1 つにつき `tickets`（`held`）と
@@ -104,7 +139,7 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
   `POST /cart/items` の `{block_id}`（1 枚追加）も残っているが frontend からは使っていない
 - 同時実行の確認は `RefreshDatabase` ではできない。開発環境に同じ席へ並列 POST して 201 が 1 件になることを確認した
   （2026-10-03、8 並列）。自由席の並列は未確認
-- E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e0%'` で除外できる
+- E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e00000-0000-4000-8000-%'` で除外できる
 
 ## 購入フローの申し送り（レビューで出て、骨格では見送った点）
 
@@ -128,10 +163,23 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
 - 「同じトランザクション内で解放してから取り直す」処理は仮押さえの延長に化けやすい（`setUnreservedQuantities` で一度出て修正済み）。
   今後 Redis 版などを作るときも、期限の付け直しは「操作前に有効な held が 0 件」の条件で判定する
 
+## イベントログ分析の申し送り（2026-10-04）
+
+- **scheduler が動いていない**: compose にも Dockerfile にも `schedule:work` / cron が無く、`routes/console.php` の
+  `tickets:expire-holds`（everyMinute）は自動実行されていない（期限切れの判定は各リクエストで行うので販売は壊れないが、行の回収は手動）。
+  scheduler サービスを足すときに `events:export`（前日分を毎日）も登録する
+- `minio/minio` イメージは 2025-10 以降 Docker Hub で更新が止まったという報告がある（手元は 2025-09-07 版）。
+  ゼロから再構築して pull に失敗したら代替イメージを検討する（未確認）
+- 合成データ生成器（`GenerateDemoData.php:450-452`）の時刻オフセットが重なっている（view_match 8〜25 分前、view_seatmap 4〜15 分前、
+  add_to_cart 1〜6 分前）。4 ステップ到達 22,442 のうち時刻順は約 8 割。順序つきファネルを主指標にするなら生成器を直す
+- pint は `use` 漏れを検出しない（`catch (Throwable)` が名前空間内のクラスを指して何も捕まえないバグをレビューで検出）。
+  静的解析（larastan）を `scripts/check.sh` に足す候補
+
 ## 次にやること
 
 [concept.md](concept.md) のロードマップ参照。直近の有力候補:
 - 管理画面: 割当・緩衝帯エディタ（match_block_allocations の編集UI）
-- events の MinIO エクスポート（JSON Lines + `dt=` Hiveパーティション）→ DuckDB分析
+- scheduler サービスの追加（`tickets:expire-holds` と `events:export` の定期実行）
+- 実 S3 + Glue/Athena（us-east-1 / us-west-2。curated を Iceberg 化）。学習メモは [dea-notes.md](dea-notes.md)
 - 販売フェーズ（年パス先行/FC先行/一般）と資格判定（`FirstComeSaleMethod` の差し替え）
 - 比較実験: 自由席 capacity の `SELECT FOR UPDATE` 対 Redis カウンタ、仮押さえの DB `expires_at` 対 Redis TTL
