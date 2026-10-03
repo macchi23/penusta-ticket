@@ -1,12 +1,15 @@
 import Link from "next/link";
-import { fetchJson, SeatMap } from "@/lib/api";
+import { notFound } from "next/navigation";
+import { SeatMap } from "@/lib/api";
+import { apiGet } from "@/lib/server-api";
 import SeatMapView from "@/components/SeatMapView";
 
 export default async function MatchPage(props: PageProps<"/matches/[id]">) {
   const { id } = await props.params;
+  if (!/^[1-9][0-9]*$/.test(id)) notFound();
   let seatmap: SeatMap;
   try {
-    seatmap = await fetchJson<SeatMap>(`/api/matches/${id}/seatmap`);
+    seatmap = await apiGet<SeatMap>(`/api/matches/${id}/seatmap`);
   } catch {
     return (
       <main className="mx-auto max-w-3xl px-4 py-10">

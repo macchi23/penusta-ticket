@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { fetchJson, Match } from "@/lib/api";
+import { Match } from "@/lib/api";
+import { apiGet } from "@/lib/server-api";
 
 type Health = { db: string; redis: string };
 
 async function getHealth(): Promise<Health | null> {
   try {
-    return await fetchJson<Health>("/api/health");
+    return await apiGet<Health>("/api/health");
   } catch {
     return null;
   }
@@ -13,7 +14,7 @@ async function getHealth(): Promise<Health | null> {
 
 async function getMatches(): Promise<Match[]> {
   try {
-    const res = await fetchJson<{ data: Match[] }>("/api/matches");
+    const res = await apiGet<{ data: Match[] }>("/api/matches");
     return res.data;
   } catch {
     return [];
