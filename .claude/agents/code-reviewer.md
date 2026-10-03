@@ -20,9 +20,12 @@ effort: high
 
 このプロジェクトで必ず見る点:
 
-- 二重販売: 指定席は部分ユニークインデックス `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL` が最後の砦。
-  それに頼る前段の検査と、制約違反時の扱いが正しいか。自由席は capacity の検査と発券が同一トランザクション内で排他されているか
-- 仮押さえ: `expires_at` 切れのチケットの扱い（残席計算、再販売、期限切れ後の決済）
+- 二重販売: 指定席は部分ユニークインデックス
+  `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL AND status NOT IN ('released','expired')` が最後の砦。
+  INSERT は `ON CONFLICT DO NOTHING` で、返りが空なら 409。自由席は `match_block_allocations` の該当行を `FOR UPDATE` してから
+  capacity を数える。ロック順は「カート行（orders）→ allocation 行 → tickets」で統一されているか
+- 仮押さえ: status は `held`、期限はカート単位（`orders.expires_at` を ticket にコピー）。時刻条件は `expires_at > now`（`<=` で期限切れ）。
+  期限切れの扱い（残席計算、再販売、期限切れ後の決済）と、`now` をロック取得後に取っているか
 - 時刻: JST の値を変換せずに保存していないか。保存は UTC、変換は明示
 - API 契約: レスポンスの形が `frontend/src/lib/api.ts` の型と一致しているか
 - クエリ: N+1、座席数（数万件）に比例するループ内クエリ、インデックスの効かない絞り込み
