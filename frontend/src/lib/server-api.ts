@@ -41,15 +41,22 @@ export async function apiGet<T>(path: string): Promise<T> {
   return res.json();
 }
 
+const FALLBACK_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
+  user_required: "ユーザーを選択してください",
+  validation_failed: "入力内容が正しくありません",
+  unknown: "エラーが発生しました",
+};
+
 function toApiError(status: number, body: unknown): ApiError {
   const b = (body ?? {}) as { message?: unknown; code?: unknown };
-  const message = typeof b.message === "string" ? b.message : `API error ${status}`;
-  let code: ApiErrorCode = "unknown";
-  if (typeof b.code === "string") {
-    if ((API_ERROR_CODES as readonly string[]).includes(b.code)) code = b.code as ApiErrorCode;
-  } else if (status === 422) code = "validation_failed";
-  else if (status === 401) code = "user_required";
-  return { code, message };
+  if (typeof b.code === "string" && (API_ERROR_CODES as readonly string[]).includes(b.code)) {
+    const code = b.code as ApiErrorCode;
+    return { code, message: typeof b.message === "string" ? b.message : FALLBACK_MESSAGES[code] ?? "エラーが発生しました" };
+  }
+  // 契約外の code は backend の message を載せない（例外内容の漏えい防止）
+  const code: ApiErrorCode =
+    status === 422 ? "validation_failed" : status === 401 ? "user_required" : "unknown";
+  return { code, message: FALLBACK_MESSAGES[code]! };
 }
 
 // Server Action 用。失敗は throw せず ActionResult で返す
