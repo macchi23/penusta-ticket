@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # 実 AWS の分析基盤（S3 / Glue / Athena）の操作。ホストの aws CLI を使う。
-# 使い方: scripts/aws-analytics.sh [sync|query <sql-file>|funnel [table]|compare [table]|status|teardown [--yes]]
+# 使い方: scripts/aws-analytics.sh [sync|query <sql-file>|ddl <sql-file>|funnel [table]|compare [table]|status|teardown [--yes]]
+# Iceberg の学習手順: analytics/athena/iceberg/ の SQL を番号順に流す。01 / 04 / 06 / 07 / 08 は ddl、03 / 05 は query。
+# 01 の後に compare events_iceberg で DuckDB と一致を確認する。ddl は実 AWS に書き込む
 # sync は scripts/analytics.sh build の直後に実行する。compare は DuckDB の penusta.duckdb を読むので、
 # 他の duckdb プロセス（analytics.sh shell など）と同時に動かさない
 # プロファイルは PENUSTA_AWS_PROFILE（既定 personal-dev-admin）。環境の AWS_* 認証情報は実 AWS 呼び出しでは無視する
@@ -16,7 +18,8 @@ RUSTFS_BUCKET=penusta-events
 OUT_DIR=analytics/.out
 
 usage() {
-  echo "usage: scripts/aws-analytics.sh [sync|query <sql-file>|funnel [table]|compare [table]|status|teardown [--yes]]" >&2
+  echo "usage: scripts/aws-analytics.sh [sync|query <sql-file>|ddl <sql-file>|funnel [table]|compare [table]|status|teardown [--yes]]" >&2
+  echo "iceberg: analytics/athena/iceberg/ の SQL を番号順に実行（01/04/06/07/08 は ddl、03/05 は query、01 の後に compare events_iceberg）" >&2
   exit 2
 }
 
@@ -43,7 +46,7 @@ require_auth() {
   arn=${ident#*$'\t'}
   expected=$(env "${AWS_ENV_UNSET[@]}" AWS_IGNORE_CONFIGURED_ENDPOINT_URLS=true aws configure get sso_account_id --profile "$PROFILE" 2>/dev/null || true)
   if [[ -z "$expected" || "$ACCOUNT" != "$expected" ]]; then
-    echo "アカウント不一致: 認証=$ACCOUNT、プロファイル $PROFILE の sso_account_id=${expected:-なし}" >&2
+    echo "アカウント不一致: 認証=${ACCOUNT}、プロファイル $PROFILE の sso_account_id=${expected:-なし}" >&2
     exit 2
   fi
   if [[ "$arn" != *assumed-role/AWSReservedSSO_* ]]; then
@@ -134,34 +137,57 @@ cmd_sync() {
   rm -rf "$TMP_DIR"
 }
 
-# 標準出力に CSV。統計は stderr
+# 標準出力に CSV。統計は stderr。QUERY_RESULTS_OPTIONAL=1 なら結果が取れなくても失敗にしない（DDL 用）
 run_query() {
-  local sql="$1" qid state reason
+  local sql="$1" qid state reason stats errors=0 started=$SECONDS
+  # if / && の条件部から呼ばれると set -e が効かないので、各コマンドの失敗を明示的に確認する
   qid=$(aws_real athena start-query-execution --work-group "$WORKGROUP" \
     --query-execution-context "Database=$DATABASE" --query-string "$sql" \
-    --query QueryExecutionId --output text)
+    --query QueryExecutionId --output text) || { echo "start-query-execution が失敗" >&2; exit 1; }
+  [[ -n "$qid" && "$qid" != None ]] || { echo "QueryExecutionId が取れない" >&2; exit 1; }
   while true; do
-    state=$(aws_real athena get-query-execution --query-execution-id "$qid" \
-      --query QueryExecution.Status.State --output text)
+    if state=$(aws_real athena get-query-execution --query-execution-id "$qid" \
+      --query QueryExecution.Status.State --output text) && [[ -n "$state" ]]; then
+      errors=0
+    else
+      errors=$((errors + 1))
+      if ((errors >= 30)); then echo "get-query-execution が 30 回連続で失敗（${qid}）" >&2; exit 1; fi
+      state=
+    fi
     case "$state" in
       SUCCEEDED) break ;;
       FAILED | CANCELLED)
         reason=$(aws_real athena get-query-execution --query-execution-id "$qid" \
-          --query QueryExecution.Status.StateChangeReason --output text)
+          --query QueryExecution.Status.StateChangeReason --output text) || reason="(取得失敗)"
         echo "Athena クエリが $state: $reason" >&2
         exit 1
         ;;
     esac
+    if ((SECONDS - started > 600)); then
+      echo "Athena クエリが 600 秒で完了しない（${qid}, state=${state:-不明}）。停止を要求する" >&2
+      aws_real athena stop-query-execution --query-execution-id "$qid" >/dev/null 2>&1 || true
+      exit 1
+    fi
     sleep 1
   done
-  aws_real athena get-query-execution --query-execution-id "$qid" \
-    --query 'QueryExecution.Statistics.[DataScannedInBytes,TotalExecutionTimeInMillis]' --output text |
-    awk '{printf "scanned=%s bytes, time=%s ms\n", $1, $2}' >&2
+  stats=$(aws_real athena get-query-execution --query-execution-id "$qid" \
+    --query 'QueryExecution.Statistics.[DataScannedInBytes,TotalExecutionTimeInMillis]' --output text) ||
+    { echo "統計の取得に失敗" >&2; exit 1; }
+  awk '{printf "scanned=%s bytes, time=%s ms\n", $1, $2}' <<<"$stats" >&2
   # CLI の自動ページングが NextToken を辿って Rows を結合する
-  aws_real athena get-query-results --query-execution-id "$qid" --output json |
-    jq -r '.ResultSet.Rows[] | [.Data[] | .VarCharValue // ""]
+  local results rc=0
+  results=$(aws_real athena get-query-results --query-execution-id "$qid" --output json 2>&1) || rc=$?
+  if ((rc != 0)); then
+    if [[ "${QUERY_RESULTS_OPTIONAL:-}" == 1 ]]; then
+      echo "(結果行なし)" >&2
+      return 0
+    fi
+    echo "get-query-results が失敗: $results" >&2
+    exit 1
+  fi
+  jq -r '.ResultSet.Rows[]? | [.Data[] | .VarCharValue // ""]
       | map(if . == "" then "" elif test("[,\"\n]") then "\"" + gsub("\""; "\"\"") + "\"" else . end)
-      | join(",")'
+      | join(",")' <<<"$results"
 }
 
 # query は SELECT / WITH のみ。先頭の空白行と -- 行コメントを除いた最初の語で判定する
@@ -182,15 +208,31 @@ cmd_query() {
   run_query "$sql"
 }
 
-# funnel / compare で使える table と、{{source}} に埋める式（Iceberg のテーブル名はここに足す）
+# ddl: SELECT / WITH 以外も流す（CTAS / MERGE / OPTIMIZE / VACUUM 等）。実 AWS に書き込むので SQL 全文を先に表示する。
+# {{bucket}} は検証済みバケット名に置換する
+cmd_ddl() {
+  [[ -f "${1:-}" ]] || { echo "SQL ファイルが無い: ${1:-}" >&2; exit 2; }
+  local sql
+  sql=$(<"$1")
+  sql=${sql//'{{bucket}}'/$BUCKET}
+  {
+    echo "実 AWS に書き込む（workgroup=$WORKGROUP, database=${DATABASE}）。実行する SQL:"
+    echo "----"
+    echo "$sql"
+    echo "----"
+  } >&2
+  QUERY_RESULTS_OPTIONAL=1 run_query "$sql"
+}
+
+# funnel / compare で使える table と、{{source}} に埋める式
 source_expr() {
   case "$1" in
-    events_curated) echo "events_curated" ;;
+    events_curated | events_iceberg) echo "$1" ;;
     events_raw)
       echo "(SELECT id, event_type, user_id, session_id, device, payload.match_id AS match_id, from_iso8601_timestamp(occurred_at) AS occurred_at FROM events_raw)"
       ;;
     *)
-      echo "table は events_curated / events_raw のみ: $1" >&2
+      echo "table は events_curated / events_raw / events_iceberg のみ: $1" >&2
       exit 2
       ;;
   esac
@@ -313,18 +355,28 @@ cmd_status() {
   if [[ "$tagged" -gt 0 ]]; then echo "tagged resources: present ($tagged)"; else echo "tagged resources: absent (0)"; fi
 }
 
-# 将来 Iceberg の DROP TABLE をここに足す（バケットを空にする前に実行する）
+# Iceberg の DROP TABLE（バケットを空にする前に実行する）。Glue DB が無ければスキップ。サブシェルで流し、失敗は return 1 にする
 teardown_iceberg() {
-  :
+  local out grc=0
+  out=$(aws_real glue get-database --name "$DATABASE" --query Database.Name --output text 2>&1) || grc=$?
+  if ((grc != 0)); then
+    if [[ "$out" == *EntityNotFoundException* ]]; then
+      echo "Glue DB $DATABASE が無いので Iceberg の DROP をスキップ" >&2
+      return 0
+    fi
+    echo "get-database が失敗: $out" >&2
+    return 1
+  fi
+  ( QUERY_RESULTS_OPTIONAL=1 run_query "DROP TABLE IF EXISTS events_iceberg" >/dev/null )
 }
 
 teardown_s3() {
-  aws_real s3 rm "s3://$BUCKET" --recursive --only-show-errors
+  aws_real s3 rm "s3://$BUCKET" --recursive --only-show-errors || return 1
 }
 
 teardown_stack() {
-  aws_real cloudformation delete-stack --stack-name "$STACK"
-  aws_real cloudformation wait stack-delete-complete --stack-name "$STACK"
+  aws_real cloudformation delete-stack --stack-name "$STACK" || return 1
+  aws_real cloudformation wait stack-delete-complete --stack-name "$STACK" || return 1
 }
 
 cmd_teardown() {
@@ -352,7 +404,7 @@ cmd="${1:-}"
 case "$cmd" in
   # 突き合わせロジックだけの検証用（AWS・認証不要）。analytics/ からの相対パスを 2 つ渡す
   diff-csv) diff_csv "$@"; exit ;;
-  sync | query | funnel | compare | status | teardown) ;;
+  sync | query | ddl | funnel | compare | status | teardown) ;;
   *) usage ;;
 esac
 
@@ -362,6 +414,7 @@ case "$cmd" in
   teardown) cmd_teardown "$@" ;;
   sync) load_stack; cmd_sync ;;
   query) load_stack; cmd_query "$@" ;;
+  ddl) load_stack; cmd_ddl "$@" ;;
   funnel) load_stack; cmd_funnel "$@" ;;
   compare) load_stack; cmd_compare "$@" ;;
 esac
