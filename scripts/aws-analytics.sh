@@ -213,7 +213,8 @@ cmd_query() {
 cmd_ddl() {
   [[ -f "${1:-}" ]] || { echo "SQL ファイルが無い: ${1:-}" >&2; exit 2; }
   local sql
-  sql=$(<"$1")
+  # OPTIMIZE / VACUUM は先頭にコメントがあると Trino パーサに回って MALFORMED_QUERY になるため、先頭のコメント行と空行を除く
+  sql=$(awk 'started || !/^[[:space:]]*(--.*)?$/ { started = 1; print }' "$1")
   sql=${sql//'{{bucket}}'/$BUCKET}
   {
     echo "実 AWS に書き込む（workgroup=$WORKGROUP, database=${DATABASE}）。実行する SQL:"
