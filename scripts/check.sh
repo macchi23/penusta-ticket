@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# 検証の一本化。使い方: scripts/check.sh [backend|frontend|e2e|infra|all]
+# 検証の一本化。使い方: scripts/check.sh [backend|frontend|shell|e2e|infra|all]
 set -uo pipefail
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 2
 
 target="${1:-all}"
 failed=()
@@ -67,6 +67,34 @@ infra() {
   step "cdk synth" sh -c 'cd infra && npx cdk synth -q'
 }
 
+# ホスト実行の scripts/*.sh の静的検査。macOS 標準の bash 3.2 で構文確認し、ShellCheck と grep で落とし穴を拾う
+shell_syntax() {
+  local f rc=0
+  for f in scripts/*.sh; do
+    /bin/bash -n "$f" || rc=1
+  done
+  return "$rc"
+}
+
+shellcheck_scripts() {
+  docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh
+}
+
+# $VAR 直後のマルチバイト文字は bash 3.2 で変数名に取り込まれる（ShellCheck では拾えない）。${VAR} を使う
+shell_multibyte() {
+  if LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' scripts/*.sh; then
+    echo '$VAR 直後にマルチバイト文字がある。${VAR} に直す' >&2
+    return 1
+  fi
+  return 0
+}
+
+shell() {
+  step "bash -n" shell_syntax
+  step "shellcheck" shellcheck_scripts
+  step "shell multibyte" shell_multibyte
+}
+
 if [ "$target" != infra ] && ! docker compose ps --status running --services >/dev/null 2>&1; then
   echo "docker に接続できない。Docker を起動して docker compose up -d を実行する" >&2
   exit 2
@@ -77,8 +105,9 @@ case "$target" in
   frontend) frontend ;;
   e2e) e2e ;;
   infra) infra ;;
-  all) backend; frontend ;;
-  *) echo "usage: scripts/check.sh [backend|frontend|e2e|infra|all]" >&2; exit 2 ;;
+  shell) shell ;;
+  all) backend; frontend; shell ;;
+  *) echo "usage: scripts/check.sh [backend|frontend|shell|e2e|infra|all]" >&2; exit 2 ;;
 esac
 
 echo
