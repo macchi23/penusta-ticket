@@ -7,6 +7,8 @@
 
 - artisan / composer / npm はコンテナ経由（`docker compose exec app ...` / `docker compose exec frontend ...`）。ホストの PHP は使えない
 - 例外: E2E（`e2e/`）はホストで実行する（`scripts/check.sh e2e`。初回は `cd e2e && npm ci && npx playwright install chromium`）
+- 例外: CDK（`infra/`）と実 AWS 向けの aws CLI はホストで実行する（`scripts/check.sh infra`。初回は `cd infra && npm ci`）。プロファイルは `personal-dev-admin`（`aws sso login --profile personal-dev-admin`）
+- 実 AWS への書き込み（`cdk deploy` / `destroy`、S3 への同期、Athena の DDL）はメインがユーザーに確認してから実行する。サブエージェントは synth と読み取りまで
 - 時刻は UTC で保存する。JST の値は `Carbon::parse($v, 'Asia/Tokyo')->utc()` で明示変換してから保存
 - Next.js のコードを書く前に `frontend/node_modules/next/dist/docs/` の該当ガイドを読む（学習済みの規約と違う）
 - API 契約は `frontend/src/lib/api.ts` の型が正。backend をこれに合わせる

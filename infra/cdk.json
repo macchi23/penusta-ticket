@@ -1,0 +1,6 @@
+{
+  "app": "npx tsx bin/penusta-analytics.ts",
+  "watch": {
+    "exclude": ["node_modules", "cdk.out"]
+  }
+}

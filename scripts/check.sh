@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 検証の一本化。使い方: scripts/check.sh [backend|frontend|e2e|all]
+# 検証の一本化。使い方: scripts/check.sh [backend|frontend|e2e|infra|all]
 set -uo pipefail
 cd "$(dirname "$0")/.."
 
@@ -57,7 +57,17 @@ e2e() {
   step "playwright" sh -c 'cd e2e && npx playwright test'
 }
 
-if ! docker compose ps --status running --services >/dev/null 2>&1; then
+# infra（CDK）はホストで実行する。認証情報なしで synth まで。all には含めない
+infra() {
+  if [ ! -d infra/node_modules ]; then
+    echo "初回は cd infra && npm ci" >&2
+    exit 2
+  fi
+  step "infra tsc" sh -c 'cd infra && npx tsc --noEmit'
+  step "cdk synth" sh -c 'cd infra && npx cdk synth -q'
+}
+
+if [ "$target" != infra ] && ! docker compose ps --status running --services >/dev/null 2>&1; then
   echo "docker に接続できない。Docker を起動して docker compose up -d を実行する" >&2
   exit 2
 fi
@@ -66,8 +76,9 @@ case "$target" in
   backend) backend ;;
   frontend) frontend ;;
   e2e) e2e ;;
+  infra) infra ;;
   all) backend; frontend ;;
-  *) echo "usage: scripts/check.sh [backend|frontend|e2e|all]" >&2; exit 2 ;;
+  *) echo "usage: scripts/check.sh [backend|frontend|e2e|infra|all]" >&2; exit 2 ;;
 esac
 
 echo
