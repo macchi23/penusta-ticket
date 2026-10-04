@@ -3,6 +3,8 @@ name: penusta-ticket
 services:
   app:
     build: ./docker/php
+    # scheduler と同じイメージを使う（別名だとビルド時期の違いで PHP のパッチバージョンがずれる）
+    image: penusta-ticket-php
     volumes:
       - ./backend:/var/www/html
     depends_on:
@@ -10,6 +12,25 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
+
+  # schedule:work は毎分 schedule:run を別プロセスで起動するので console.php の変更は再起動不要。
+  # restart を unless-stopped にしない理由: 他サービスに restart が無く、Docker 再起動後に scheduler だけ上がって毎分失敗する
+  scheduler:
+    build: ./docker/php
+    image: penusta-ticket-php
+    command: ["php", "artisan", "schedule:work"]
+    volumes:
+      - ./backend:/var/www/html
+    environment:
+      LOG_STACK: "single,stderr"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+    restart: on-failure
+    # SIGTERM 後は実行中の schedule:run（events:export を含む）の完了を待つ。既定の 10 秒では打ち切られうる
+    stop_grace_period: 2m
 
   web:
     image: nginx:alpine
