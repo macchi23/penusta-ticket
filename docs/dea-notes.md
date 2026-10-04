@@ -340,3 +340,50 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **問題文のキーワード**
 - 「最もコスト効率が良い」→ サーバーレス、スキャン量の削減、ライフサイクル
 - 「アクセスパターンが予測できない」→ S3 Intelligent-Tiering
+
+## 13. オーケストレーション / スケジュール実行
+
+**ペヌスタでの使い方**
+- compose の `scheduler` サービスで `php artisan schedule:work` を常駐させる。定義は `backend/routes/console.php`
+- `events:export` は毎日 00:30 UTC に前日（UTC）分を出す。イベントは記録時刻＝サーバー時刻で、遅れて届くのは秒単位なので 30 分待てば確定する
+- `withoutOverlapping(60)` で二重起動を防ぐ（ロックは Redis）。既定のロック期限 24 時間だと、強制終了で残ったロックが翌日分を止めるので 60 分に縮めた
+- `tickets:expire-holds` は毎分。1 件ずつ `FOR UPDATE SKIP LOCKED` で回収するので並走しても安全で、ロックは付けない
+- 失敗は `onFailure` でコマンドの出力ごと `Log::error` → stderr → `docker compose logs scheduler`
+- 止まっていた間の分は取り戻さない（cron と同じ）。取りこぼした日は `--date` で手動で出し直す。冪等な上書きなので何度出してもよい（7. 参照）
+
+**AWS での対応**
+- 時刻起動: EventBridge Scheduler（cron / rate / 1 回限り、タイムゾーン指定、flexible time window、リトライと DLQ、at-least-once 配信）。ターゲットに ECS RunTask、Lambda、Step Functions StartExecution など
+- 手順の連鎖: Step Functions（Standard）。`export（ECS RunTask .sync）→ Athena クエリ（.sync）→ 通知` のように並べる
+- Glue だけで閉じる連鎖: Glue Workflows + Triggers（scheduled / on-demand / conditional / EventBridge イベント）
+- 既存の Airflow DAG を移す、OSS との可搬性: MWAA
+- ペヌスタを載せるなら: EventBridge Scheduler（毎日 00:30 UTC）→ Step Functions → ECS RunTask `.sync` で `artisan events:export`。新パーティションは partition projection（1. 参照）でクローラ不要。expire-holds は毎分 RunTask だと起動コストに見合わないので、常駐の ECS サービスに残すか、リクエスト時の期限判定だけにする
+
+**判断ルール**
+- 決まった時刻に 1 つのジョブを起動 → EventBridge Scheduler
+- 複数のステップを順に実行、失敗時のリトライや分岐を定義したい → Step Functions
+- Glue ジョブ・クローラだけの依存関係 → Glue Workflows（外部処理を挟むなら Step Functions）
+- Step Functions から完了を待って次へ進みたい → `.sync`（ジョブ実行）統合。Glue は `StartJobRun.sync` が使える
+- 実行時間が 15 分を超える処理 → Lambda ではなく ECS タスク / Glue ジョブ（Lambda の上限は 15 分。要確認）
+- 二重起動を防ぎたい → ジョブ側でロック・冪等化。Scheduler は at-least-once なので同じ起動が 2 回届きうる
+
+**ひっかけ**
+- 「EventBridge のスケジュールルール（cron 式のルール）で JST 9:30 に起動」→ ルールは UTC 固定で、現在は Scheduler が推奨（ルールの schedule はレガシー扱い）。タイムゾーン指定が要るなら Scheduler
+- 「Step Functions で Glue クローラを `.sync` で待つ」→ クローラは SDK 統合で `.sync` が無い。`StartCrawler` の後に Wait + `GetCrawler` のループ
+- 「Express ワークフローで ECS タスクの完了を `.sync` で待つ」→ Express は `.sync` 不可。Standard を使う
+- 「Glue Workflows で ECS タスクや Lambda を起動」→ Glue の job / crawler しか起動できない
+- 「conditional trigger だけで連鎖を始める」→ 連鎖の起点は scheduled / on-demand（または EventBridge）トリガー。conditional はトリガー経由で起動した job / crawler の完了しか見ない
+- 「運用負荷を最小にしたいので MWAA」→ 環境の管理と常時課金がある。単純な定時実行なら Scheduler、連鎖なら Step Functions
+- 「S3 にファイルが置かれたら起動」をスケジュールで解く → イベント駆動（EventBridge のイベントパターン / S3 イベント通知）が正解
+
+**問題文のキーワード**
+- 「毎日決まった時刻に」「タイムゾーンを指定して」→ EventBridge Scheduler
+- 「複数のステップを順番に」「失敗時にリトライ・通知」「視覚的なワークフロー」→ Step Functions
+- 「既存の Airflow DAG」「オープンソースのオーケストレーター」→ MWAA
+- 「Glue ジョブとクローラの依存関係」→ Glue Workflows
+- 「ファイルが到着したら」→ イベント駆動（S3 イベント / EventBridge ルールのイベントパターン）
+
+**採らなかった選択肢**
+- cron コンテナ（crond / supercronic で毎分 `schedule:run`）: `schedule:work` と挙動が同じで、環境変数の受け渡しやログ出力の手間が増えるだけ
+- MWAA: 常時課金（12. 参照）。DAG が多く依存が複雑なら正解になる
+- Glue Workflows: export は ECS / Laravel 側の処理で Glue の外にある。全工程が Glue ジョブなら正解になる
+- 毎時、前日分を出し直す: 取りこぼしには強いが、上書きが 1 日 24 回になる。Scheduler のリトライ + 冪等な上書きで足りる

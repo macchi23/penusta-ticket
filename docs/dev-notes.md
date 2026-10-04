@@ -4,7 +4,7 @@
 
 ## 現状
 
-docker compose 7サービス（app/web/frontend/db/redis/rustfs/mailpit）+ profile 付きの analytics（DuckDB）/ aws（aws CLI）で、
+docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpit）+ profile 付きの analytics（DuckDB）/ aws（aws CLI）で、
 試合一覧 → 座席図 → 席クリックで仮押さえ → 購入手続き → 決済モック → 完了、まで動く。
 購入フローは DB だけで動く骨格（`docs/concept.md` の設計方針 3 の差し替え点は具象クラス 1 つずつ）。
 
@@ -114,7 +114,41 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 - `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
 - ファネル（2026-10-04 再生成後）: (session_id, match_id) 単位で view_match 89,764 → view_seatmap 56,160 → add_to_cart 35,970 →
   purchase 22,441。合成データの購入セッションは時刻順に並ぶので、順序つき到達も 22,441（順序不問と一致）
-- スケジュール登録はしていない（下の申し送り: scheduler が動いていない）
+- 前日分は scheduler が毎日 00:30 UTC（JST 09:30）に自動で出す（下の「scheduler」）
+
+## scheduler（2026-10-04）
+
+compose の `scheduler` サービスが `php artisan schedule:work` を常駐させる。定義は `backend/routes/console.php`、登録内容のテストは
+`tests/Feature/ScheduleTest.php`。
+
+| コマンド | 頻度 | 重複防止 |
+|---|---|---|
+| `tickets:expire-holds` | 毎分 | なし（1 件ずつ `FOR UPDATE SKIP LOCKED` なので並走しても安全） |
+| `events:export`（前日 UTC 分） | 毎日 00:30 UTC | `withoutOverlapping(60)`（Redis ロック、期限 60 分） |
+
+```bash
+docker compose logs -f scheduler                                   # 毎分の Running [...] DONE / FAIL と失敗時の Log::error
+docker compose exec scheduler php artisan schedule:list            # 次回実行時刻
+docker compose exec scheduler php artisan schedule:test --name=events:export   # 今すぐ 1 回（--name に php artisan は付けない）
+```
+
+- `schedule:work` は毎分 `schedule:run` を別プロセスで起動するので、console.php・コマンド・`.env` の変更は再起動なしで次の分から効く。
+  compose の environment を変えたときだけ `docker compose up -d scheduler`
+- 失敗時は `onFailure` がコマンドの出力（`storage/logs/schedule-<sha1>.log`、毎回上書き）を `Log::error` に渡し、scheduler だけに
+  設定した `LOG_STACK=single,stderr` で docker logs に出る。`config:cache` を使うとこの上書きが効かなくなる（bind mount で app と
+  scheduler が同じキャッシュを読む）ので使わない
+- `schedule:test` の表示は終了コードを見ずに DONE を出す。失敗は直後の `local.ERROR: Scheduled command failed` で判断する
+  （`schedule:run` 経由なら FAIL と出る）
+- 止まっていた間の実行は取り戻さない。Mac のスリープ等で 00:30 UTC を逃した日は `events:export --date=` で出し直す（冪等な上書き）
+- 強制終了で `events:export` のロックが残ったら最大 60 分スキップされる。急ぐなら `php artisan schedule:clear-cache`
+- `restart: on-failure`（`unless-stopped` だと Docker 再起動後に scheduler だけ上がり、db が無いまま毎分失敗する）、
+  `stop_grace_period: 2m`（停止時に実行中の export を待つ）
+- app と scheduler は同じイメージ `penusta-ticket-php` を使う（別名だと片方だけ再ビルドして PHP のパッチバージョンがずれた。
+  8.4.24 / 8.4.26 で実際に発生）。Dockerfile を変えたら `docker compose build app` 1 回で両方に効く
+- scheduler には `USE_ZEND_ALLOC=0` を付けていない（付けると memory_limit が効かなくなる懸念）。PHP 8.4.26 で全期間の export を
+  env なしで 3 回流し、heap 破損は出なかった。必要なのは大量 insert の `penusta:generate-demo-data` だけ
+- scheduler は root で動き、bind mount の `storage/logs` にファイルを作る。Docker Desktop for Mac ではホストユーザー所有に見えるので
+  問題ないが、Linux ホストで root 所有の `laravel.log` が先にできると php-fpm（www-data）が書けなくなる。Linux では `user: www-data` を付ける
 
 ## 購入フローの構造（2026-10-03）
 
@@ -165,9 +199,8 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 
 ## イベントログ分析の申し送り（2026-10-04）
 
-- **scheduler が動いていない**: compose にも Dockerfile にも `schedule:work` / cron が無く、`routes/console.php` の
-  `tickets:expire-holds`（everyMinute）は自動実行されていない（期限切れの判定は各リクエストで行うので販売は壊れないが、行の回収は手動）。
-  scheduler サービスを足すときに `events:export`（前日分を毎日）も登録する
+- ~~scheduler が動いていない~~ → 解消（2026-10-04）。compose の `scheduler` サービスで `tickets:expire-holds`（毎分）と
+  `events:export`（毎日 00:30 UTC）を自動実行する（上の「scheduler」）
 - S3 互換ストレージは MinIO から RustFS（`rustfs/rustfs:1.0.1`、Apache-2.0）に置き換えた（2026-10-04）。`minio/minio` と `minio/mc` は
   Docker Hub から削除され、quay.io も匿名 pull 不可で、ゼロから再構築できなくなっていた（GitHub の minio/minio も archived）。
   mc の代わりに aws CLI コンテナ（profile `tools`）を使う。イメージはタグ + digest で固定。タグ無しのイメージ（`axllent/mailpit` 等）は
@@ -183,7 +216,6 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 
 [concept.md](concept.md) のロードマップ参照。直近の有力候補:
 - 管理画面: 割当・緩衝帯エディタ（match_block_allocations の編集UI）
-- scheduler サービスの追加（`tickets:expire-holds` と `events:export` の定期実行）
 - 実 S3 + Glue/Athena（us-east-1 / us-west-2。curated を Iceberg 化）。学習メモは [dea-notes.md](dea-notes.md)
 - 販売フェーズ（年パス先行/FC先行/一般）と資格判定（`FirstComeSaleMethod` の差し替え）
 - 比較実験: 自由席 capacity の `SELECT FOR UPDATE` 対 Redis カウンタ、仮押さえの DB `expires_at` 対 Redis TTL
