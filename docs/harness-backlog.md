@@ -30,3 +30,8 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | researcher.md に「plan mode 中でも plan ファイルは書かない（メインが書く）」を明記する案。plan mode の指示と「レポート用ファイルを書かない」定義が衝突した（scheduler 調査） | 1 | 2026-10-04 | 候補 |
 | 定義修正 | implementer（haiku）がブリーフの「ログ・出力はそのまま貼る」を守らず要約だけ返した（scheduler の compose 追加）。返却形式に「貼れと指示された出力は省略しない」を足す案 | 1 | 2026-10-04 | 候補 |
 | 定義修正 | compose にサービスを足すブリーフ / レビュー観点に「同じ Dockerfile を使うなら `image:` を共有する」を入れる案。別名だとビルド時期の違いで PHP 8.4.24 / 8.4.26 にずれた（レビューで検出） | 1 | 2026-10-04 | 候補 |
+| check | ホスト実行の `scripts/*.sh` を check の対象にする（ShellCheck をコンテナで実行 + `/bin/bash -n`）。macOS の bash 3.2 の落とし穴をレビューで 2 ステップ続けて検出した（`local` 変数を EXIT trap で参照して unbound、条件部から呼んだ関数で `set -e` が無効、`$VAR` 直後のマルチバイト文字） | 2 | 2026-10-05 | 候補 |
+| 定義修正 | researcher のブリーフに「環境の前提（ホストのツール有無・バージョン、~/.aws のプロファイル）は自分で確かめる」を入れる案。「ホストの Node 有無は不明」と書いたが読み取りで確認できた | 1 | 2026-10-05 | 候補 |
+| 定義修正 | 読み取り専用のレビュー役に、ファイル作成や docker 実行が要る動作確認を頼んだ（diff-csv の 5 ケース）。動作確認は implementer / verifier のブリーフに入れる | 1 | 2026-10-05 | 候補 |
+| 定義修正 | implementer に Web 取得手段が無く、ブリーフの「公式ドキュメントで確認」を満たせなかった（Iceberg の timestamp 精度を記憶で書き、レビューで重大として検出）。外部仕様の確認は researcher に分けるか、implementer に WebFetch を許可する | 1 | 2026-10-05 | 候補 |
+| 定義修正 | security-reviewer の観点に「`.claude/settings*.json` の allow 追加」を入れる案。`query:*` の自動許可で任意 SQL（DROP / UNLOAD）を確認なしに流せる穴をレビューが検出した | 1 | 2026-10-05 | 候補 |

@@ -48,8 +48,8 @@
 - [ ] 抽選販売、waiting room（Redis/キュー）
 - [x] イベントログの S3 互換ストレージ（RustFS）へのエクスポート → DuckDB ローカル分析（`events:export` + `scripts/analytics.sh`）
   - [ ] dbt によるモデリング
-- [ ] 実 S3 + Glue/Athena パイプライン（DEA 対策）
+- [x] 実 S3 + Glue/Athena パイプライン（DEA 対策）（2026-10-05）。CDK（`infra/`）で S3 + Glue + Athena WorkGroup を us-east-1 に作り、raw / curated を sync して funnel を照合、片付けまで実施（手順は dev-notes.md「実 AWS」）
   - リージョンは us-east-1 か us-west-2（レイテンシ不問、単価が安く新機能が早い）。常時課金のサービス（MWAA、EMR、Redshift プロビジョンド）は使わない
-  - curated を Iceberg テーブル化（Glue Data Catalog + Athena）。アトミックな上書き、タイムトラベル、`MERGE INTO` / `OPTIMIZE` / `VACUUM`
+  - [x] curated を Iceberg テーブル化（Glue Data Catalog + Athena）。アトミックな上書き、タイムトラベル、`MERGE INTO` / `OPTIMIZE` / `VACUUM`（CTAS → MERGE → time travel → OPTIMIZE → VACUUM を実機で確認）
 - [ ] 需要予測・動的価格（MLA 対策）
 - [ ] QR 入場・入場実績データ

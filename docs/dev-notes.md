@@ -1,6 +1,6 @@
 # 開発メモ（引き継ぎ）
 
-最終更新: 2026-10-04（イベントログのエクスポートと DuckDB 分析を追加）
+最終更新: 2026-10-05（実 AWS: S3 + Glue/Athena を追加）
 
 ## 現状
 
@@ -106,6 +106,7 @@ scripts/analytics.sh shell     # DuckDB の対話モード
     1 dt = 1 ファイル。再実行すると固定キーを上書きし、同じ dt 配下の他キーを消す（二重にならない）
   - `curated/events/dt=YYYY-MM-DD/part-0.parquet`: DuckDB が raw から作る。build のたびに作り直す
   - ファイルに dt 列は入れない（Athena でパーティション列と重複するとエラー）。実 S3 へは `aws s3 sync` で同じ形のまま移せる
+  （実際に `scripts/aws-analytics.sh sync` で移した。下の「実 AWS」）
 - E2E 由来（`session_id LIKE 'e2e00000-0000-4000-8000-%'`、`e2e/lib/session.ts` の固定部分）と `session_id = 'unknown'` は raw には残し、
   DuckDB の `events_clean` ビューで除外する。`'e2e0%'` だと合成データの UUID が偶然一致したセッション（1 件）まで消える
 - DuckDB は compose の `analytics` サービス（`duckdb/duckdb:1.5.6`、profile `analytics`）。RustFS へは `rustfs:9000`。
@@ -212,10 +213,111 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - pint は `use` 漏れを検出しない（`catch (Throwable)` が名前空間内のクラスを指して何も捕まえないバグをレビューで検出）。
   静的解析（larastan）を `scripts/check.sh` に足す候補
 
+## 実 AWS（S3 + Glue/Athena）（2026-10-05）
+
+構成は `infra/`（CDK TypeScript、ホスト実行、`aws-cdk-lib` 2.272.0 / `aws-cdk` 2.1144.0 固定）。スタック `PenustaAnalytics`（us-east-1 固定）:
+S3 `penusta-analytics-<account>`、Glue DB `penusta_analytics`、Glue テーブル `events_raw`（Hive JSON SerDe）/ `events_curated`（Parquet、
+どちらも partition projection）、Athena WorkGroup `penusta-analytics`。学習メモは [dea-notes.md](dea-notes.md) の 14.。
+
+### 前提
+
+```bash
+aws sso login --profile personal-dev-admin     # 期限切れのたびに
+cd infra && npm ci                              # 初回のみ（ホストで実行）
+```
+
+- プロファイルは `PENUSTA_AWS_PROFILE`（既定 `personal-dev-admin`）。`scripts/aws-analytics.sh` は `--profile` で渡し、環境変数のキーと
+  `AWS_ENDPOINT_URL*`（RustFS 向け）は外す。操作前に Account が `sso_account_id` と一致、Arn が `AWSReservedSSO_`、バケット名が
+  `penusta-analytics-<account>` であることを確かめる
+- CDK と実 AWS 向けの aws CLI はホスト実行（コンテナ経由ルールの例外。CLAUDE.md 参照）
+
+### 作成
+
+```bash
+cd infra && npx cdk deploy --profile personal-dev-admin
+```
+
+`LegacyStackSynthesizer` + アセットなしなので bootstrap 不要（初回 26 秒、テーブル追加 9 秒）。
+
+### 同期と照合
+
+```bash
+scripts/analytics.sh build                                   # 先に curated を作り直す
+scripts/aws-analytics.sh sync                                # RustFS → 一時ディレクトリ → 実 S3
+scripts/aws-analytics.sh compare events_curated              # DuckDB のファネルと照合
+scripts/aws-analytics.sh compare events_raw
+scripts/aws-analytics.sh funnel [table]                      # 試合別ファネルだけ見る
+scripts/aws-analytics.sh query <sql-file>                    # SELECT / WITH のみ（例: analytics/athena/funnel_by_match.sql）
+```
+
+- 期待値（2026-10-05）: sync は raw 351 / curated 351 オブジェクト。`compare` はどちらも ok（ファネル合計 89,764 / 56,160 / 35,970 / 22,441 / 22,441）。
+  events_curated は 19.5MB スキャン・3.1 秒、events_raw は 19.7MB・5.4 秒
+
+### Iceberg（curated の Iceberg 化）
+
+SQL は `analytics/athena/iceberg/01〜08`。`ddl` は制限なしで実行する（`{{bucket}}` 置換、先頭コメント行は除去してから送る）。
+
+```bash
+I=analytics/athena/iceberg
+scripts/aws-analytics.sh ddl   $I/01_create.sql         # CTAS（events_iceberg を作る）
+scripts/aws-analytics.sh compare events_iceberg
+scripts/aws-analytics.sh query $I/03_snapshots.sql      # スナップショット一覧（append が 1 つ）
+scripts/aws-analytics.sh ddl   $I/04_merge.sql          # MERGE（冪等。件数は変わらない）
+scripts/aws-analytics.sh query $I/03_snapshots.sql      # overwrite が増えた
+# 05（time travel）は最初の snapshot_id に置き換えたコピーを作って query する（リポジトリのファイルは書き換えない）
+scripts/aws-analytics.sh ddl   $I/06_optimize.sql       # OPTIMIZE
+scripts/aws-analytics.sh ddl   $I/07_snapshot_age.sql   # snapshot age を 60 秒に
+sleep 60
+scripts/aws-analytics.sh ddl   $I/08_vacuum.sql         # VACUUM
+scripts/aws-analytics.sh compare events_iceberg
+```
+
+- 結果（2026-10-05）: CTAS 6.8MB スキャン・4.3 秒 → MERGE（2026-01-10 の 233 行、0.6MB）で overwrite スナップショット、件数は 204,353 のまま →
+  time travel（`FOR VERSION AS OF` 最初の snapshot_id）は before / current とも 204,353、スキャン 0 バイト（メタデータで count）→
+  OPTIMIZE で replace スナップショット（0.18MB）→ VACUUM でスナップショット 3 → 1、`iceberg/events/` は 22 オブジェクト 4.1MB、compare は ok
+- 実行時の注意: `ddl` の実行が `query` と違い自動許可されない（Claude Code から流すときは都度承認）
+
+### 片付け
+
+```bash
+scripts/aws-analytics.sh teardown     # Iceberg テーブルの DROP とスタック削除
+scripts/aws-analytics.sh status       # S3 / Glue DB / WorkGroup / スタックがすべて absent であること
+```
+
+- スタックが `ROLLBACK_COMPLETE` などで Outputs が無いと teardown は止まる。その場合は `aws cloudformation delete-stack --stack-name PenustaAnalytics --region us-east-1 --profile personal-dev-admin` を手で
+- teardown を `cdk destroy` にしていないのは、CDK（JS SDK）が同名プロファイルの static キーを優先しうるため。`delete-stack` に一本化した
+- Glue の Database / Table はタグ付けできないので、タグ検索だけでは残存確認にならない
+
+片付け結果（2026-10-05）: `teardown --yes` で Iceberg の DROP → `s3 rm` → `delete-stack` + wait まで通り、
+`status` は stack / S3 バケット / Glue DB / WorkGroup / タグ付きリソース（0 件）がすべて absent。
+us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象外なので残っている。
+
+### 費用の目安
+
+- Athena は $5/TB・MB 切り上げ・1 クエリ最低 10MB。DDL と失敗クエリは無課金。WorkGroup でスキャン 1GB/クエリの上限を enforce している
+- 今回の全クエリで $0.001 未満の見込み。Glue Data Catalog は 100 万オブジェクト・月 100 万リクエストまで無料。S3 は 2025-07-15 より前に作ったアカウントなら旧無料枠（12 か月）、以降はクレジット制の新プラン
+
+### 注意
+
+- `sync` は必ず `scripts/analytics.sh build` の直後に。build 前だと古い curated が S3 に載る
+- `sync` の `--delete` は `raw/events/` と `curated/events/` に限る。`iceberg/events/` には及ばない
+- Iceberg テーブルは CFn の外（Athena の DDL）で作るので、Athena の DROP TABLE でデータも消える。teardown で DROP してからスタックを消す
+- partition projection の範囲は 2025-12-01〜2026-12-31 に固定。合成データの範囲外の日付を足すときは `infra/` のテーブル定義を直す
+  （`NOW+2YEARS` のような広い範囲は候補日ごとに S3 LIST が走る。funnel 1 回で約 4,000 LIST になり、無料枠 2,000/月を超える）
+- export 先（`events:export`）を実 S3 に切り替えていない。app と scheduler が `.env` を共有して毎日実 AWS に書くことになり、SSO 期限切れで失敗し、
+  Laravel の s3 ディスクに token キーが無く `AWS_SESSION_TOKEN` が落ちるため
+- クローラは使わない（スタック外にテーブルができる、型推論が揺れる、DPU 時間課金・最低 10 分）
+- us-east-1 には別件の CDKToolkit（2026-03-21 作成）が既にある。今回は使っておらず、消してもいない
+- macOS の `/bin/bash` 3.2 での罠（`aws-analytics.sh` で踏んだ）: `local` 変数を EXIT trap で参照すると `set -u` で unbound /
+  `if` や `&&` の条件部から呼んだ関数内では `set -e` が効かない / `$VAR` の直後にマルチバイト文字が続くと変数名に取り込まれる（`${VAR}` と書く）
+- Claude Code の auto mode は `cdk deploy` を拒否した。`!` でユーザーが実行し、`.claude/settings.local.json` に範囲を絞って許可を足した
+  （cdk diff / deploy と `aws-analytics.sh` の sync / query / funnel / compare）。`query` は SELECT / WITH だけ通し、書き込みは `ddl` に分けてある
+  （自動許可で任意 SQL を流せると DROP / UNLOAD が通ってしまう）。`ddl` / `teardown` / `cdk destroy` は都度承認
+
 ## 次にやること
 
 [concept.md](concept.md) のロードマップ参照。直近の有力候補:
 - 管理画面: 割当・緩衝帯エディタ（match_block_allocations の編集UI）
-- 実 S3 + Glue/Athena（us-east-1 / us-west-2。curated を Iceberg 化）。学習メモは [dea-notes.md](dea-notes.md)
+- ~~実 S3 + Glue/Athena~~ → 完了（2026-10-05。上の「実 AWS」）
 - 販売フェーズ（年パス先行/FC先行/一般）と資格判定（`FirstComeSaleMethod` の差し替え）
 - 比較実験: 自由席 capacity の `SELECT FOR UPDATE` 対 Redis カウンタ、仮押さえの DB `expires_at` 対 Redis TTL

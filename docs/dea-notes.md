@@ -1,7 +1,9 @@
 # DEA 学習メモ（ペヌスタでの実装と対応づけ）
 
 AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリポジトリで実際に下した判断と結びつけて記録する。
-タスクを終えるたびに追記する。料金・上限値は記憶ベースのものに「要確認」を付けている。
+タスクを終えるたびに追記する。料金・上限値は記憶ベースのものに「要確認」を付けている（2026-10-05 に確かめたものは「確認済み」に更新。実機で確かめたものは本文に「実機」と書き、それ以外は公式の料金ページ・ドキュメントや技術記事による）。
+
+これから手を動かす演習の候補は dea-exercises.md にまとめている。
 
 ## 使い方（問題を作るとき）
 
@@ -90,7 +92,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 分析クエリで一部の列だけ読む → 列指向（Parquet / ORC）。スキャン量が減る
 - 取り込みの直後（ランディング）は人が読める・どこからでも書ける形式（JSON / CSV）、分析用には列指向に変換して別の層に置く
 - Firehose で JSON を受けて Parquet で S3 に置きたい → Firehose のレコード形式変換（Glue Data Catalog のテーブル定義が必要）
-- Athena CTAS / INSERT INTO は 1 回のクエリで書けるパーティション数に上限がある（100、要確認）→ 多数の日付をまとめて変換するときは分割して実行
+- Athena CTAS / INSERT INTO は 1 回のクエリで書けるパーティション数に上限がある（100、確認済み 2026-10-05）→ 多数の日付をまとめて変換するときは分割して実行
 
 **ひっかけ**
 - 「CSV を gzip 圧縮すれば Parquet と同等にスキャン量が減る」→ 圧縮しても全列を読む。列の読み飛ばしはできない
@@ -239,7 +241,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **ペヌスタでの使い方**
 - curated の作り直しは「プレフィックスを消す → 書く」で、その間に読むと欠けたデータが見える（ローカルの遊びなので許容）
 - DuckDB の S3 へのパーティション書き込みは上書き（OVERWRITE）に対応していないため、先に `aws s3 rm` で消している
-- ロードマップ: 実 AWS で curated を Iceberg テーブル化する（Glue Data Catalog + Athena）
+- 実 AWS（2026-10-05）では curated の Parquet（Hive テーブル `events_curated`）とは別に、Athena の CTAS で Iceberg テーブル `events_iceberg` を作って試した（`analytics/athena/iceberg/`、詳細は 14.）
 
 **AWS での対応**
 - S3 は 1 オブジェクトの PUT は原子的で、2020-12 以降は強い read-after-write 整合性。ただし複数オブジェクトをまとめて入れ替えるトランザクションはない
@@ -257,12 +259,20 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「S3 バージョニングを有効にすればテーブル単位のトランザクションになる」→ オブジェクト単位の履歴であり、複数ファイルの一貫性は保証しない
 - 「Hive 形式のテーブルに Athena で UPDATE / DELETE できる」→ できない。Iceberg テーブルが必要
 
+**実機で確かめたこと（2026-10-05、Athena / us-east-1）**
+- CTAS で Hive テーブルから Iceberg に変換できる。ただし Hive の timestamp（精度 3 固定）のままだと `Timestamp precision (3) not supported for Iceberg`。`CAST(... AS timestamp(6))` が必要
+- 初回 CTAS で append のスナップショット 1 つ。`MERGE INTO`（2026-01-10 の 233 行）で overwrite のスナップショットが増え、件数は変わらない（冪等）
+- time travel（`FOR VERSION AS OF <最初の snapshot_id>`）は変更前の状態を返す。件数だけならメタデータで答えるのでスキャン 0 バイト
+- `OPTIMIZE` で replace スナップショットができ、データファイルが束ねられる。`VACUUM` はテーブルプロパティの snapshot age（60 秒に設定）を過ぎた古いスナップショットとファイルを消す（スナップショット 3 → 1）
+- OPTIMIZE / VACUUM は SQL の先頭にコメント行があると Trino パーサに回され `MALFORMED_QUERY`（mismatched input 'OPTIMIZE'）になる。CTAS / MERGE / ALTER はコメント付きでも通った
+- Iceberg の DROP TABLE（Athena）はデータも消える
+
 **問題文のキーワード**
 - 「レコード単位の更新・削除」「ACID」「タイムトラベル」「ユーザーのデータを削除する要求」→ Iceberg（Athena / Glue）
 - 「運用負荷を最小に Iceberg を使いたい」→ S3 Tables（要確認）
 
 **採らなかった選択肢**
-- ローカルで Iceberg（REST カタログ + DuckDB、または PyIceberg + SQLite カタログ）: 仕組みを手元で確かめられるが今回の範囲外
+- ローカルで Iceberg（REST カタログ + DuckDB、または PyIceberg + SQLite カタログ）: 仕組みを手元で確かめられるが今回は実 AWS（Athena）で試した
 
 ## 10. バッチとストリーミング
 
@@ -296,6 +306,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **ペヌスタでの使い方**
 - DuckDB の S3 シークレットは毎回一時的に作る（`CREATE SECRET`）。`CREATE PERSISTENT SECRET` は平文でディスクに保存されるので使わない
 - 認証情報はローカル開発用の固定値（RustFS のアクセスキー）
+- 実 AWS（2026-10-05）は IAM Identity Center（SSO）の一時認証情報。`personal-dev-admin` プロファイルを `--profile` 引数で渡し、環境変数のキーは外す（詳細は 14.）
 
 **AWS での対応**
 - 実行環境（Glue ジョブ、Lambda、EC2、ECS）には IAM ロールを付け、アクセスキーを埋め込まない
@@ -311,6 +322,13 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「Glue ジョブのスクリプトや環境変数にアクセスキーを書く」→ 誤り。ロールを使う
 - 「Parameter Store で自動ローテーション」→ 自動ローテーションは Secrets Manager の機能
 
+**実機で確かめたこと（2026-10-05）**
+- aws CLI は `AWS_PROFILE` を環境変数で渡すと、環境変数の `AWS_ACCESS_KEY_ID` 等が優先されうる。`--profile` 引数なら無視される
+- CDK（JS SDK）は同名プロファイルの static キーを優先しうる。そのため teardown は `aws cloudformation delete-stack` に一本化した
+- `AWS_ENDPOINT_URL*` や config の `endpoint_url`（ローカルの RustFS 向け）が実 AWS 呼び出しに混ざる。`AWS_IGNORE_CONFIGURED_ENDPOINT_URLS=true` で無視できる
+- Laravel の s3 ディスクには token のキーが無く、`AWS_SESSION_TOKEN` が落ちる。SSO の一時認証情報では動かないので、`events:export` の出力先は実 S3 に切り替えていない
+- 操作前に `sts get-caller-identity` 相当で Account と Arn（`AWSReservedSSO_`）を確認してから書き込む
+
 **問題文のキーワード**
 - 「認証情報をコードに埋め込まずに」「自動ローテーション」→ Secrets Manager
 - 「列レベル」「行レベルのアクセス制御」→ Lake Formation
@@ -325,7 +343,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 常時課金のサービス（MWAA、EMR クラスタ、Redshift プロビジョンド）は座学のみ
 
 **AWS での対応（料金はすべて要確認）**
-- 従量で安い: S3、Athena（スキャン 1TB あたり約 $5、1 クエリ最低 10MB）、Glue Data Catalog（100 万オブジェクトまで無料）、Glue ETL（DPU 時間課金）、Firehose（取り込み GB 課金）、Lambda、Step Functions、EventBridge Scheduler
+- 従量で安い: S3、Athena（スキャン 1TB あたり $5、1 クエリ最低 10MB。確認済み 2026-10-05）、Glue Data Catalog（100 万オブジェクト・月 100 万リクエストまで無料。確認済み）、Glue ETL（DPU 時間課金）、Firehose（取り込み GB 課金）、Lambda、Step Functions、EventBridge Scheduler
 - 時間課金で放置すると高い: Kinesis Data Streams（シャード時間）、Redshift Serverless（RPU 時間、使った時だけ）、MWAA（環境の時間課金、最小構成でも月数百ドル）、EMR（インスタンス時間）
 
 **判断ルール**
@@ -335,6 +353,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ひっかけ**
 - 「Athena の料金は実行時間で決まる」→ スキャン量で決まる（プロビジョンド容量を使う場合を除く）
+- 「DDL や失敗したクエリも課金される」→ 無課金。キャンセルしたクエリはスキャンした分が課金される
 - 「月に数回のクエリのために Redshift プロビジョンドクラスタを常時起動」→ Athena か Redshift Serverless
 
 **問題文のキーワード**
@@ -387,3 +406,51 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - MWAA: 常時課金（12. 参照）。DAG が多く依存が複雑なら正解になる
 - Glue Workflows: export は ECS / Laravel 側の処理で Glue の外にある。全工程が Glue ジョブなら正解になる
 - 毎時、前日分を出し直す: 取りこぼしには強いが、上書きが 1 日 24 回になる。Scheduler のリトライ + 冪等な上書きで足りる
+
+## 14. 実 AWS でのカタログとクエリ基盤（S3 + Glue + Athena）
+
+2026-10-05 に us-east-1 に CDK（`infra/`）で作って確かめた。
+
+**ペヌスタでの使い方**
+- Glue DB `penusta_analytics`、テーブル `events_raw`（Hive JSON SerDe、payload は struct、occurred_at は ISO8601 文字列）と `events_curated`（Parquet）を CfnTable で定義。パーティション列 dt は partition projection（2025-12-01〜2026-12-31 の固定範囲）
+- `events_iceberg` は Athena の CTAS で作る（CFn の外）
+- Athena WorkGroup `penusta-analytics`: engine v3、クエリ結果は Athena 管理（結果バケット不要、24 時間で消える）、スキャン上限 1GB / クエリ + enforce
+- S3 は BPA、SSE-S3、SSL 強制、versioning なし、中断マルチパートは 1 日で破棄。タグ `project=penusta-analytics` を App に 1 か所
+- 実績: funnel を DuckDB と照合して一致（events_curated 19.5MB スキャン・3.1 秒 / events_raw 19.7MB・5.4 秒 / events_iceberg 12.6MB）。1 クエリの課金最小は 10MB で、全体で $0.001 未満の見込み
+
+**AWS での対応**
+- パーティションの登録: partition projection / クローラ / `MSCK REPAIR TABLE` / `ALTER TABLE ADD PARTITION`（1. 参照）
+- JSON の SerDe: Hive JSON SerDe と OpenX JSON SerDe。ドキュメントは OpenX が結果が非決定的になりうると警告しているので Hive JSON を選んだ
+- Athena の管理するクエリ結果（managed query results）: 結果バケットを指定しなくてよい
+- WorkGroup の「クエリあたりのデータ使用量制限」+ 設定の強制（enforce）で、超えたクエリを打ち切る
+- CDK のデプロイ: bootstrap（CDKToolkit スタック）を使う標準のシンセサイザと、使わない `LegacyStackSynthesizer`
+
+**判断ルール**
+- 日付パーティションの範囲が決まっている → partition projection に固定範囲を書く。`NOW+2YEARS` のような広い範囲は候補日ごとに S3 LIST が走る（funnel 1 回で約 4,000 LIST、無料枠 2,000/月を超えた）→ データを覆う範囲にする
+- スキーマが決まっていて IaC で管理したい → テーブルを CfnTable で定義する。クローラは使わない（DPU 時間課金・最低 10 分、型推論が揺れる、テーブルがスタックの外にできる。最低 10 分は確認済み）
+- Iceberg テーブルを CFn（`OpenTableFormatInput`）で持たない → 書き込みごとに metadata_location が変わりドリフトする。Athena の DROP TABLE でデータも消えるので Athena 側で作って消す
+- スタックにアセット（Lambda 等）が無い → bootstrap なしでデプロイできる（`LegacyStackSynthesizer`）。標準のシンセサイザでは CDKToolkit のステージングバケットが Retain + versioning で残る。`autoDeleteObjects` は Lambda アセットなので bootstrap 必須で、ロググループも残る
+- クエリの暴走を防ぎたい → WorkGroup のスキャン量上限を enforce
+- Athena の課金: スキャン量 $5/TB、MB 切り上げ、1 クエリ最低 10MB、無料枠なし。DDL と失敗クエリは無課金、キャンセルはスキャン分課金。Parquet・パーティション絞り込み・列の絞り込みでスキャンを減らす
+- Iceberg の MERGE は merge-on-read 型で、小さな差分ファイルが増える → `OPTIMIZE` で束ね、`VACUUM` で古いスナップショットを消す（9. 参照）
+- DuckDB など別エンジンの SQL を Athena（Trino）に移すときは方言を直す: `GROUP BY ALL` は Trino では別の意味（列を明示する）、整数どうしの割り算は切り捨て（`CAST(... AS double)`）。`FILTER` / `GROUPING` / `ROLLUP` はそのまま通った
+- タグでリソースを探す・コスト配分する → 付けられるリソースにだけ付く。Glue の Database / Table は CFn にタグ属性が無く付かない。タグ検索だけでは残存確認にならない
+
+**ひっかけ**
+- 「Glue クローラで毎日パーティションを登録するのが運用負荷最小」→ partition projection ならクローラ不要
+- 「partition projection の範囲は広めにしておくと安全」→ 範囲の候補ごとに S3 LIST が走り、無料枠を超える
+- 「Athena の DDL（CREATE TABLE）はスキャン量で課金される」→ 無課金
+- 「Athena のクエリ結果の保存先は必ずバケットを用意する」→ 管理されたクエリ結果なら不要
+- 「Iceberg テーブルの DROP でデータは残る」→ Athena の Iceberg では消える
+- 「CDK の `autoDeleteObjects` は bootstrap 不要」→ カスタムリソース（Lambda アセット）を使うので bootstrap が要る
+
+**問題文のキーワード**
+- 「スキーマが固定」「IaC」「運用負荷を最小」→ テーブル定義 + partition projection
+- 「クエリごとのスキャン量を制限」「コスト管理」→ WorkGroup のデータ使用量制限
+- 「JSON を Athena で読む」→ SerDe の指定（Hive JSON / OpenX）
+
+**採らなかった選択肢**
+- Glue クローラ: スキーマが未知で探索したいときの手段。今回は列も型も決まっている
+- Iceberg テーブルを CFn で作る: Glue カタログだけで管理する場合や書き込みがほぼ無い場合は選択肢になるが、ドリフトの扱いが要る
+- 標準のシンセサイザ（bootstrap あり）: Lambda などのアセットが要るときは必須
+- export 先を実 S3 に切り替える: app と scheduler が `.env` を共有しており、毎日実 AWS に書くことになる。SSO の期限切れと s3 ディスクの token キー欠落で動かない。今は RustFS → sync の 2 段
