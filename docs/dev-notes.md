@@ -1,6 +1,6 @@
 # 開発メモ（引き継ぎ）
 
-最終更新: 2026-10-05（実 AWS: S3 + Glue/Athena を追加）
+最終更新: 2026-10-06（管理画面: 割当・緩衝帯エディタを追加）
 
 ## 現状
 
@@ -14,7 +14,9 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 - 認証は無い。開発用の「ユーザー切替」（画面上部のバー）で合成ユーザーになりきる。
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
-- 投入済みデータ: 10試合 / 指定席3,200席+自由席8ブロック / ユーザー2,000 / 注文2.2万 / チケット4.8万 / イベント20万
+- 投入済みデータ: 12試合（うち 2026-11-28 / 12-05 の 2 試合はチケット 0 の未販売）/ 指定席3,200席+自由席8ブロック / ユーザー2,000 + 管理者 1 /
+  注文2.2万 / チケット4.8万 / イベント20万
+- 管理画面 http://localhost:3100/admin （ユーザー切替で先頭の「管理者」を選ぶ）で試合ごとの割当を塗り替えられる（下の「割当エディタ」）
 - events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
 
 ## 環境の注意点（ハマりどころ）
@@ -54,8 +56,8 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 ```bash
 docker compose up -d --build
 docker compose exec app php artisan key:generate      # 初回のみ（.envはbackend/.env.exampleからコピー）
-docker compose exec app php artisan migrate:fresh --seed --force
-docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data
+docker compose exec app php artisan migrate:fresh --seed --force   # 管理者と未販売の 2 試合もここで入る
+docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data   # 未販売の試合は飛ばす
 # S3 バケット（初回のみ）。aws CLI コンテナは compose の環境変数で RustFS を向く
 docker compose --profile tools run --rm -T aws s3 mb s3://penusta-events
 # イベントログのエクスポートと分析用 DB（任意）
@@ -69,7 +71,7 @@ scripts/analytics.sh build
   events テーブルは `ActivityEvent`
 - 座席図のAPI契約は `frontend/src/lib/api.ts` の型が正（バックエンドはこれに合わせる）
 - 割当テンプレートは試合作成時に `match_block_allocations` へコピー展開（AllocationSeeder参照）。
-  緩衝帯いじりはこのテーブルを更新すればフロントに即反映される
+  試合ごとの変更は `Services/Admin/AllocationChangeService` 経由で行う（直接 UPDATE すると購入側との直列化と監査が抜ける）
 - 合成データの分布ルールは `app/Console/Commands/GenerateDemoData.php`。mt_srand(42)で再現可能（mt_rand 由来の値のみ。uuid・ID・created_at は
   実行ごとに変わる）。生成器を直すときは mt_rand の呼び出し回数・順序・幅（max − min）を変えなければ後続の生成は同じ値になる
 
@@ -158,7 +160,8 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - status は `App\Enums\TicketStatus`（held / paid / released / expired）、`OrderStatus`（pending / paid / expired）
 - 二重販売防止: 指定席は部分ユニーク `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL AND status NOT IN ('released','expired')`
   に `ON CONFLICT DO NOTHING` で当てる。自由席は `match_block_allocations` の行を `FOR UPDATE` して capacity を数える。
-  ロック順は「カート行 → allocation 行 → tickets」で統一（`CartService` / `DbUnreservedStock` / `CheckoutService`）
+  ロック順は「カート行 → allocation 行 → tickets」で統一（`CartService` / `DbUnreservedStock` / `CheckoutService`）。
+  2026-10-06 から指定席も allocation 行を `FOR SHARE` で取る（下の「割当エディタ」のロック設計）
 - 期限はカート単位（`orders.expires_at`、各 ticket にコピー、既定 10 分 = `config/ticketing.php`）。
   正しさは残席計算・席状態・確定時の時刻条件（`expires_at > now`）で保証し、`tickets:expire-holds`（毎分）は状態の整理
 - 差し替え点（`backend/app/Services/`）: `Purchase/FirstComeSaleMethod`（販売方式）、`Purchase/DbUnreservedStock`（自由席在庫）、
@@ -173,7 +176,8 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - 自由席は `PUT /api/matches/{match}/cart/blocks/{block}/items` に券種ごとの枚数を送って一括反映する（増減を 1 トランザクションで）。
   `POST /cart/items` の `{block_id}`（1 枚追加）も残っているが frontend からは使っていない
 - 同時実行の確認は `RefreshDatabase` ではできない。開発環境に同じ席へ並列 POST して 201 が 1 件になることを確認した
-  （2026-10-03、8 並列）。自由席の並列は未確認
+  （2026-10-03、8 並列）。自由席の並列は未確認。
+  ロックの待ち合いは 2026-10-06 から PHPUnit で検証している（`tests/Concerns/UsesProbeConnection`。下の「割当エディタ」）
 - E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e00000-0000-4000-8000-%'` で除外できる
 
 ## 購入フローの申し送り（レビューで出て、骨格では見送った点）
@@ -197,6 +201,80 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
   `for update` の直後に時刻を期限後へ進める）で、ロック前に `now` を取る退行を検出する
 - 「同じトランザクション内で解放してから取り直す」処理は仮押さえの延長に化けやすい（`setUnreservedQuantities` で一度出て修正済み）。
   今後 Redis 版などを作るときも、期限の付け直しは「操作前に有効な held が 0 件」の条件で判定する
+
+## 割当エディタ（2026-10-06）
+
+管理者が試合ごとにブロックの割当（home / away / buffer / closed）を変える。画面は `/admin` → `/admin/matches/{id}/allocations`
+（座席図の上でブラシを選んで塗り、差分を保存）。結果は一般利用者の座席図と購入可否にそのまま効く。
+
+### 既存の開発 DB に入れる手順
+
+```bash
+docker compose exec app php artisan migrate                               # users.role、allocation の check 制約、監査テーブル
+docker compose exec app php artisan db:seed --class=AdminUserSeeder       # 管理者（admin@penusta.example、パスワードはランダム）
+docker compose exec app php artisan db:seed --class=AddUnsoldMatchesSeeder  # 未販売の 2 試合（allocation・価格も）
+```
+
+どちらの seeder も冪等。2026-10-06 に適用済み（管理者 id 4002、未販売の試合 id 11 / 12）。`next.config.ts` を変えたので、
+403 / 401 のページが出ないときは `docker compose restart frontend`。
+
+### 決めたこと
+
+- 認可: `users.role`（customer / admin、check 制約、fillable 外）と Gate `manage-allocations`。`/api/admin/*` は
+  `auth:demo` + `can:manage-allocations` + throttle（`admin-read` 120/分、`admin-write` 30/分）を `routes/api.php` の 1 箇所で掛ける。
+  サービス（`isAdmin()`）と FormRequest でも再検査する。demo が無効なら `auth:demo` で 401 になり、admin も閉じる
+- 編集ルールは試合の状態ではなくチケットの有無で決める。consuming（paid か期限内の held）が 1 枚でもあるブロックは変更を拒否する。
+  期限切れの held は数えない。キックオフ後の試合は読み取り専用。1 回の保存は全件適用か全件拒否
+  - dev の合成データは全試合の home / away に paid があるので、緩衝帯の拡大を試せるのは未販売の 2 試合だけ
+  - ブロック単位の属性なので「空き席だけに適用」はできない。やるなら席単位の割当が要る
+- 楽観的な同時編集: PATCH はブロックごとに `expected`（画面に見えていた値）を送り、現在値と違えば 409 `stale`。
+  差分だけを送るので、触っていないブロックは競合しない
+- 監査: `match_block_allocation_changes`（from / to、changed_by、change_set_id、changed_at UTC）に同じトランザクションで書く。
+  FK はすべて restrict（試合やユーザーを消しても履歴が消えない）。events（ActivityEvent）には載せない。events は利用者の行動ログで、
+  合成データと粒度を揃えているため。分析に使うときは監査表を別データセットとして export する
+- API 契約は `frontend/src/lib/api.ts` の `AdminMatch` / `AdminAllocations` / `AllocationChange` / `AllocationConflict`。
+  409 は `{code, message, details: {blocks}}`。`server-api.ts` の許可リストは `Record<ApiErrorCode, true>` で、コードの追加漏れは tsc で落ちる
+
+### ロック設計
+
+| 経路 | allocation 行 | その後 |
+|---|---|---|
+| 管理者の保存（`AllocationChangeService::apply`） | 対象を block_id 昇順で `FOR UPDATE`（`SET LOCAL lock_timeout`、既定 3000ms） | ロック後に `now` → キックオフ判定 → チケットはロックせずに数える → update + 監査 |
+| 指定席の仮押さえ（`CartService::addItem`） | `FOR SHARE` | tickets を insert（partial unique index が最後の砦） |
+| 自由席の仮押さえ（`addItem` / `setUnreservedQuantities` → `DbUnreservedStock`） | `FOR UPDATE`（従来どおり） | capacity を数えて insert |
+| 確定（`CheckoutService::checkout`） | held のチケットがあるブロックだけ、block_id 昇順に 1 行ずつ席種別のモードで | ロック後に `now` → 期限判定 → tickets `FOR UPDATE` → paid |
+
+- 購入側はチケットを consuming にする前に必ず allocation 行をロックし、ロックした読み取りの値で販売可否を決める
+  （`Services/Purchase/AllocationLocks`）。管理者は `FOR UPDATE` するので、判定と購入が直列化される
+- 指定席を `FOR UPDATE` にしないのは、checkout が決済呼び出しの間もロックを持つため。同じブロックの指定席購入が決済待ちで並んでしまう
+- 同じトランザクション内で同じ行を `FOR SHARE` から `FOR UPDATE` に上げない（同じブロックで 2 人が SHARE を握って待ち合う）。
+  モードは不変の `seating_type` で決め打ちにする。checkout で 2 種別をクエリ 2 本に分けると昇順が崩れて管理者とデッドロックしうるので、1 行ずつ回す
+- `addItem` / `setUnreservedQuantities` は allocation ロックの後に `now` を取り直さない。カート期限の判定は orders ロック直後の `now` で
+  済んでいて、ここで進めると「期限切れ held を残したまま `expires_at` だけ延長」になり、checkout で新しい分ごと期限切れになる
+  （一度そう直してレビューで差し戻した）。checkout だけはロック後に取る
+- checkout が released / expired のチケットのブロックまでロックすると、追加と削除を繰り返して多数のブロックを握れてしまう（レビューで検出）。held に絞っている
+- 購入側の 55P03 / 40P01（ロック待ちのタイムアウト、デッドロックの再試行切れ）は api/* で 503 `busy` にし、SQL を返さない。
+  管理者側の 55P03 は 409 `allocation_busy`
+- `apply` は最上位のトランザクションでしか呼べない（`SET LOCAL` と 55P03 の abort が外側に及ぶ）。HTTP テストも `DatabaseTruncation` で書く
+
+### テスト
+
+- `tests/Concerns/UsesProbeConnection`: 別接続 `probe` で行を握り、本接続に `lock_timeout=200ms` をかけて「待たされる / 通る」を判定する。
+  `DB::connection()->beforeExecuting` で「ロック直前に別接続がコミットした」状況を作れる。`DatabaseTruncation` は終了時に自分で truncate する
+  （残すと後続の `RefreshDatabase` 系の件数が壊れる）
+- `AllocationLockTest`（購入側）、`AllocationChangeServiceTest`（管理者側）、`Admin/AdminAllocationApiTest`、`Admin/BusyConversionTest`
+- E2E `e2e/tests/admin-allocations.spec.ts`: 403 / 401、塗って保存、一般利用者の購入不可、ロック表示、他の管理者との競合。
+  `afterAll` でカートと割当を開始時の値に戻す
+
+### 申し送り
+
+- E2E は未販売の試合に依存する。2026-11-28 / 12-05 のキックオフを過ぎると編集できる試合が無くなり、`pickEditableUnsoldMatch` が理由付きで落ちる。
+  `MatchSeeder::fixtures()` の未販売分の日付を先へずらして `AddUnsoldMatchesSeeder` を流し直す（kickoff で同一判定しているので、日付を変えると別の試合として増える）
+- 一般利用者の座席図の「購入不可」は色とカーソルだけで、文言が無い（E2E は `data-allocation` で見ている）
+- demo 有効時は cookie を管理者の id に書き換えれば誰でも管理者になれる（demo guard の前提どおり）。本物の認証は `auth:demo` の差し替えから
+- CORS は `CORS_ALLOWED_ORIGINS`（既定 `http://localhost:3100`）に限定した。ブラウザから API を直接呼ぶ箇所は無い
+- `{match}` / `{block}` は `Route::pattern` で数値に限定している（非数値は 404）
+- 購入側には `lock_timeout` を掛けていない。管理者の保存は短いので待つ側にしている
 
 ## イベントログ分析の申し送り（2026-10-04）
 
@@ -317,7 +395,7 @@ us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象
 ## 次にやること
 
 [concept.md](concept.md) のロードマップ参照。直近の有力候補:
-- 管理画面: 割当・緩衝帯エディタ（match_block_allocations の編集UI）
+- ~~管理画面: 割当・緩衝帯エディタ~~ → 完了（2026-10-06。上の「割当エディタ」）
 - ~~実 S3 + Glue/Athena~~ → 完了（2026-10-05。上の「実 AWS」）
 - 販売フェーズ（年パス先行/FC先行/一般）と資格判定（`FirstComeSaleMethod` の差し替え）
 - 比較実験: 自由席 capacity の `SELECT FOR UPDATE` 対 Redis カウンタ、仮押さえの DB `expires_at` 対 Redis TTL
