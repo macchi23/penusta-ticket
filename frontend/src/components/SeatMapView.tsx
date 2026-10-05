@@ -28,6 +28,7 @@ export default function SeatMapView({
             <g
               key={b.id}
               data-testid={`block-${b.id}`}
+              data-allocation={b.allocation}
               onClick={() => isSellable(b.allocation) && onSelectBlock(b)}
               className={isSellable(b.allocation) ? "cursor-pointer" : "cursor-not-allowed"}
             >

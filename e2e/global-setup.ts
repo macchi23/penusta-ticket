@@ -1,4 +1,4 @@
-import { pickOnSaleMatch, pickReservedBlock } from './lib/api';
+import { pickAdmin, pickEditableUnsoldMatch, pickOnSaleMatch, pickReservedBlock, pickUsers } from './lib/api';
 
 const FRONT = 'http://localhost:3100';
 
@@ -16,5 +16,19 @@ export default async function globalSetup(): Promise<void> {
   const blockId = await pickReservedBlock(matchId);
   for (const path of [`/matches/${matchId}?block=${blockId}`, `/matches/${matchId}/checkout`, '/orders/1']) {
     await fetch(`${FRONT}${path}`);
+  }
+
+  // 管理画面（一覧・エディタ・403・401）。対象試合が無くても他の spec は動かすので握りつぶす
+  try {
+    const adminId = await pickAdmin();
+    const [customerId] = await pickUsers(1);
+    const as = (id?: number) => (id === undefined ? {} : { headers: { Cookie: `penusta_demo_user=${id}` } });
+    const adminMatch = await pickEditableUnsoldMatch(adminId);
+    await fetch(`${FRONT}/admin`, as(adminId));
+    await fetch(`${FRONT}/admin/matches/${adminMatch}/allocations`, as(adminId));
+    await fetch(`${FRONT}/admin`, as(customerId));
+    await fetch(`${FRONT}/admin`);
+  } catch {
+    // 対象無しは spec 側の beforeAll が分かるメッセージで落とす
   }
 }

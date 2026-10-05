@@ -127,3 +127,73 @@ export async function cartItemCount(userId: number, matchId: number): Promise<nu
   const { cart } = await getJson<{ cart: { items: CartItem[] } | null }>(userId, `/api/matches/${matchId}/cart`);
   return cart?.items.length ?? 0;
 }
+
+export type AdminBlock = {
+  id: number;
+  code: string;
+  seating_type: 'reserved' | 'unreserved';
+  seat_category: string;
+  allocation: string;
+  locked: boolean;
+};
+export type AllocationChange = { block_id: number; expected: string; allocation: string };
+
+export async function pickAdmin(): Promise<number> {
+  const { data } = await getJson<{ data: { id: number; role: string }[] }>(undefined, '/api/demo/users?limit=200');
+  const a = data.find((u) => u.role === 'admin');
+  if (!a) throw new Error('role=admin のユーザーがいない');
+  return a.id;
+}
+
+export async function getAdminAllocations(adminId: number, matchId: number): Promise<{ editable: boolean; blocks: AdminBlock[] }> {
+  return getJson(adminId, `/api/admin/matches/${matchId}/allocations`);
+}
+
+export async function patchAllocations(
+  adminId: number,
+  matchId: number,
+  changes: AllocationChange[],
+): Promise<{ status: number; body: unknown }> {
+  const api = await newApi(adminId);
+  try {
+    const res = await api.patch(`/api/admin/matches/${matchId}/allocations`, { data: { changes } });
+    return { status: res.status(), body: await res.json().catch(() => null) };
+  } finally {
+    await api.dispose();
+  }
+}
+
+export async function pickEditableUnsoldMatch(adminId: number): Promise<number> {
+  const { data } = await getJson<{ data: { id: number; editable: boolean; status: string }[] }>(adminId, '/api/admin/matches');
+  for (const m of data.filter((x) => x.editable && x.status === 'on_sale')) {
+    const { blocks } = await getAdminAllocations(adminId, m.id);
+    if (blocks.every((b) => !b.locked)) return m.id;
+  }
+  throw new Error(
+    '未販売試合が無い。AddUnsoldMatchesSeeder の適用か、kickoff 日付（2026-12-05 以降は全試合キックオフ済みになる）を確認',
+  );
+}
+
+// 自由席ブロックの数量を 1 枚セットする（先頭の券種）。レスポンスの status と body を返す
+export async function setUnreservedQuantity(
+  userId: number,
+  matchId: number,
+  block: { id: number; seat_category: string },
+  quantity: number,
+): Promise<{ status: number; body: unknown }> {
+  const { data } = await getJson<{ data: { seat_category: string; ticket_type: { id: number; code: string } }[] }>(
+    undefined,
+    `/api/matches/${matchId}/prices`,
+  );
+  const p = data.find((x) => x.seat_category === block.seat_category && x.ticket_type.code !== 'season_pass');
+  if (!p) throw new Error('券種が見つからない');
+  const api = await newApi(userId);
+  try {
+    const res = await api.put(`/api/matches/${matchId}/cart/blocks/${block.id}/items`, {
+      data: { quantities: [{ ticket_type_id: p.ticket_type.id, quantity }] },
+    });
+    return { status: res.status(), body: await res.json().catch(() => null) };
+  } finally {
+    await api.dispose();
+  }
+}
