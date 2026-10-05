@@ -18,6 +18,8 @@ export default async function globalSetup(): Promise<void> {
     await fetch(`${FRONT}${path}`);
   }
 
+  await fetch(`${FRONT}/__e2e-warmup-not-found`);
+
   // 管理画面（一覧・エディタ・403・401）。対象試合が無くても他の spec は動かすので握りつぶす
   try {
     const adminId = await pickAdmin();

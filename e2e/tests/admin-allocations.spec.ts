@@ -91,6 +91,7 @@ test.describe.serial('管理画面の割当エディタ', () => {
     }
   });
 
+
   test('管理者が自由席ブロックを緩衝帯に塗って保存できる', async ({ page, context }) => {
     await signInAs(context, adminId);
     await page.goto('/admin');
@@ -161,5 +162,66 @@ test.describe.serial('管理画面の割当エディタ', () => {
     await expect(page.getByText(`${other.code}: 他の管理者が変更済み（現在: 緩衝帯（販売なし））`)).toBeVisible();
     await expect(block(page, other.code)).toHaveAttribute('data-allocation', 'buffer');
     await expect(page.getByRole('heading', { name: '変更（0 件）' })).toBeVisible();
+  });
+});
+
+// 割当に依存しない（落ちても割当エディタのテストを巻き込まない）
+test.describe('管理画面の入口と 404', () => {
+  let adminId: number;
+  let customerId: number;
+
+  test.beforeAll(async () => {
+    adminId = await pickAdmin();
+    [customerId] = await pickUsers(1);
+  });
+
+  // 画面上部のユーザー切替バーの実 UI で選ぶ（cookie のみ。DB は書き換えない）
+  const switchUser = async (page: Page, id: number | null) => {
+    const select = page.getByRole('combobox');
+    const value = id === null ? '' : String(id);
+    // option の表示は「名前 (#id)」。バーには名前が出る
+    const label = (await select.locator(`option[value="${value}"]`).textContent()) ?? '';
+    const expected = id === null ? 'ユーザー未選択' : label.replace(/\s*\(#\d+\)$/, '');
+    await select.selectOption(value);
+    await page.getByRole('button', { name: '切替', exact: true }).click();
+    // Server Action の cookie 設定とバー再描画の完了を待つ（待たずに goto すると未反映の cookie で遷移する。A→B でも効く）
+    await expect(page.getByText('DEV').locator('..')).toContainText(expected);
+  };
+  const notFoundText = (page: Page) => page.getByText('ページが見つかりません。');
+
+  test('UI で一般ユーザーを選ぶと /admin は 403 で forbidden が出る（404 ではない）', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.getByText('ユーザー未選択')).toBeVisible();
+    await switchUser(page, customerId);
+
+    const res = await page.goto('/admin');
+    expect(res?.status()).toBe(403);
+    await expect(page.getByText('この画面を表示する権限がありません。')).toBeVisible();
+    await expect(notFoundText(page)).toHaveCount(0);
+  });
+
+  test('未選択のまま /admin は 401 で unauthorized が出る', async ({ page }) => {
+    const res = await page.goto('/admin');
+    expect(res?.status()).toBe(401);
+    await expect(page.getByText('ユーザーが選択されていません。')).toBeVisible();
+    await expect(notFoundText(page)).toHaveCount(0);
+  });
+
+  test('管理画面を開いたままバーで一般ユーザーに切り替えると forbidden になる', async ({ page }) => {
+    await page.goto('/');
+    await switchUser(page, adminId);
+    await page.goto('/admin');
+    await expect(page.getByRole('heading', { name: '管理画面: 席種割当' })).toBeVisible();
+
+    await switchUser(page, customerId);
+    await expect(page.getByText('この画面を表示する権限がありません。')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '管理画面: 席種割当' })).toHaveCount(0);
+  });
+
+  test('存在しない URL（/matches/admin）は 404 で日本語の not-found が出る', async ({ page }) => {
+    const res = await page.goto('/matches/admin');
+    expect(res?.status()).toBe(404);
+    await expect(notFoundText(page)).toBeVisible();
+    await expect(page.getByRole('link', { name: '試合一覧へ' })).toHaveAttribute('href', '/');
   });
 });
