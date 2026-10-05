@@ -35,7 +35,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | 読み取り専用のレビュー役に、ファイル作成や docker 実行が要る動作確認を頼んだ（diff-csv の 5 ケース）。動作確認は implementer / verifier のブリーフに入れる | 1 | 2026-10-05 | 候補 |
 | 定義修正 | implementer に Web 取得手段が無く、ブリーフの「公式ドキュメントで確認」を満たせなかった（Iceberg の timestamp 精度を記憶で書き、レビューで重大として検出）。外部仕様の確認は researcher に分けるか、implementer に WebFetch を許可する | 1 | 2026-10-05 | 候補 |
 | 定義修正 | security-reviewer の観点に「`.claude/settings*.json` の allow 追加」を入れる案。`query:*` の自動許可で任意 SQL（DROP / UNLOAD）を確認なしに流せる穴をレビューが検出した | 1 | 2026-10-05 | 候補 |
-| 定義修正 | implementer.md に同時実行テストの定石を足す案: `tests/Concerns/UsesProbeConnection`（別接続で行を握り lock_timeout で待ちを判定）、`beforeExecuting` で「ロック直前のコミット」を再現、`DatabaseTruncation` は終了時に自分で truncate、最上位トランザクション前提のサービスは HTTP テストも `DatabaseTruncation`。割当エディタのステップ 3・4・5 の implementer がそれぞれ「ブリーフに書いてあれば探索が減る」と返した | 2 | 2026-10-06 | 候補 |
+| 定義修正 | implementer.md に同時実行テストの定石を足す案: `tests/Concerns/UsesProbeConnection`（別接続で行を握り lock_timeout で待ちを判定）、`beforeExecuting` で「ロック直前のコミット」を再現、`DatabaseTruncation` は終了時に自分で truncate、最上位トランザクション前提のサービスは HTTP テストも `DatabaseTruncation`。割当エディタのステップ 3・4・5 の implementer がそれぞれ「ブリーフに書いてあれば探索が減る」と返した | 2 | 2026-10-06 | 採用（`.claude/agents/implementer.md`） |
 | check | ロック順の宣言（orders → allocation → tickets）を SQL ログから検査するテストヘルパの共通化。`setUnreservedQuantities` の tickets UPDATE → allocation の順序違反がテストをすり抜け、security-reviewer が検出 | 1 | 2026-10-06 | 候補 |
 | 定義修正 | レビューの修正案を差し戻しにそのまま流したら、別の不変条件を壊した（ロック後に `now` を取り直す → カート内の held の期限が揃わなくなる。再レビューで検出して撤回）。販売整合性まわりの修正案は、副作用をメインが確かめてから渡す | 1 | 2026-10-06 | 候補 |
 | 定義修正 | implementer がブリーフで必読とした Next.js の docs を一部読まずに実装した（authInterrupts.md、server-actions.md。差し戻しで再指示しても server-actions.md は未読のまま）。返却の「読んだ docs」に未読分と理由を書かせるだけでなく、必読は読んでから書くことを定義に入れる | 1 | 2026-10-06 | 候補 |

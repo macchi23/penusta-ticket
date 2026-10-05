@@ -14,6 +14,15 @@ effort: medium
 - frontend を触るときは、書く前に `frontend/node_modules/next/dist/docs/` の該当ガイドを読む
 - API のレスポンスを変えるときは `frontend/src/lib/api.ts` の型を先に確定し、backend をそれに合わせる
 - backend の変更には Feature テストを書く。DB を使うテストは `RefreshDatabase` を使う（テストは `penusta_test` で走る）
+- ロックの待ち合いや同時実行を検証するテストは、`RefreshDatabase` ではできない（テスト全体が 1 トランザクションで、別接続から見えない）。
+  次の定石に従う:
+  - クラスは `DatabaseTruncation` + `tests/Concerns/UsesProbeConnection`（別接続 `probe` で行を `FOR SHARE` / `FOR UPDATE` で握り、
+    本接続に `SET lock_timeout = '200ms'` をかけて、55P03 なら「待たされた」、成功なら「並行できた」と判定する）。fixture は `tests/Concerns/BuildsSaleFixture`
+  - 「ロック直前に別トランザクションがコミットした」状況は `DB::connection()->beforeExecuting` で、対象のロッククエリの直前に probe からコミットして作る
+  - ロック順・ロック前後の SQL の順序は `DB::listen` で SQL 列を取って assert する
+  - 後始末は probe の rollback → purge → truncate の順。`DatabaseTruncation` は開始時にしか truncate しないので、終了時に自分で消す
+    （残すと後続の `RefreshDatabase` 系テストの件数が壊れる）。phpunit は `--order-by=random` でも 1 回流す
+  - 最上位トランザクションでしか呼べないサービス（例: `AllocationChangeService::apply`）は、HTTP 経由のテストも `DatabaseTruncation` で書く
 - 返す前に `scripts/check.sh` を対象（`backend` / `frontend` / `all`）で実行し、通す
 - ブリーフに無い判断が必要になったら、最も保守的な選択で進め、返却の「逸脱・判断」に書く。
   ブリーフの前提が誤っていて進められない場合は、実装せずにその旨を返す
