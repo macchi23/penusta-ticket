@@ -119,7 +119,7 @@ export type ApiErrorCode =
   | "seat_unavailable" | "sold_out" | "cart_expired"
   | "cart_limit_reached" | "not_on_sale" | "price_not_found" | "cart_empty"
   | "payment_declined" | "user_required" | "validation_failed" | "unknown"
-  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy";
+  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden";
 export type ApiError = { code: ApiErrorCode; message: string; details?: { blocks?: AllocationConflict[] } };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export type SeatDisplayStatus = SeatStatus | "mine";

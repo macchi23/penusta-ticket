@@ -9,7 +9,7 @@ const API_ERROR_CODE_MAP: Record<ApiErrorCode, true> = {
   seat_unavailable: true, sold_out: true, cart_expired: true,
   cart_limit_reached: true, not_on_sale: true, price_not_found: true, cart_empty: true,
   payment_declined: true, user_required: true, validation_failed: true, unknown: true,
-  allocation_conflict: true, match_locked: true, allocation_busy: true, busy: true,
+  allocation_conflict: true, match_locked: true, allocation_busy: true, busy: true, forbidden: true,
 };
 const API_ERROR_CODES = Object.keys(API_ERROR_CODE_MAP) as ApiErrorCode[];
 
@@ -47,6 +47,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 const FALLBACK_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
   user_required: "ユーザーを選択してください",
   validation_failed: "入力内容が正しくありません",
+  forbidden: "この操作の権限がありません",
   unknown: "エラーが発生しました",
 };
 
@@ -66,7 +67,10 @@ function toApiError(status: number, body: unknown): ApiError {
   }
   // 契約外の code は backend の message を載せない（例外内容の漏えい防止）
   const code: ApiErrorCode =
-    status === 422 ? "validation_failed" : status === 401 ? "user_required" : "unknown";
+    status === 422 ? "validation_failed"
+    : status === 401 ? "user_required"
+    : status === 403 ? "forbidden"
+    : "unknown";
   return { code, message: FALLBACK_MESSAGES[code]! };
 }
 

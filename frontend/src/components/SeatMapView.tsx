@@ -1,24 +1,7 @@
 "use client";
 
-import { Allocation, BlockInfo, SeatMap } from "@/lib/api";
-
-const ALLOCATION_COLORS: Record<Allocation, string> = {
-  home: "#2563eb",
-  away: "#dc2626",
-  buffer: "#9ca3af",
-  closed: "#374151",
-};
-
-const ALLOCATION_LABELS: Record<Allocation, string> = {
-  home: "ホーム",
-  away: "アウェー",
-  buffer: "緩衝帯（販売なし）",
-  closed: "閉鎖",
-};
-
-function isSellableAllocation(b: BlockInfo): boolean {
-  return b.allocation === "home" || b.allocation === "away";
-}
+import { BlockInfo, SeatMap } from "@/lib/api";
+import { ALLOCATION_COLORS, ALLOCATION_LABELS, ALLOCATIONS, isSellable } from "@/lib/allocation";
 
 function blockOpacity(b: BlockInfo): number {
   if (b.allocation === "buffer" || b.allocation === "closed") return 0.5;
@@ -66,8 +49,8 @@ export default function SeatMapView({
             <g
               key={b.id}
               data-testid={`block-${b.id}`}
-              onClick={() => isSellableAllocation(b) && onSelectBlock(b)}
-              className={isSellableAllocation(b) ? "cursor-pointer" : "cursor-not-allowed"}
+              onClick={() => isSellable(b.allocation) && onSelectBlock(b)}
+              className={isSellable(b.allocation) ? "cursor-pointer" : "cursor-not-allowed"}
             >
               <rect
                 x={b.geometry.x}
@@ -95,7 +78,7 @@ export default function SeatMapView({
           ))}
         </svg>
         <div className="mt-3 flex flex-wrap gap-4 text-sm">
-          {(Object.keys(ALLOCATION_LABELS) as Allocation[]).map((a) => (
+          {ALLOCATIONS.map((a) => (
             <span key={a} className="flex items-center gap-1.5">
               <span
                 className="inline-block h-3 w-3 rounded-sm"
