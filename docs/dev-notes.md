@@ -264,13 +264,18 @@ docker compose exec app php artisan db:seed --class=AddUnsoldMatchesSeeder  # �
   （残すと後続の `RefreshDatabase` 系の件数が壊れる）
 - `AllocationLockTest`（購入側）、`AllocationChangeServiceTest`（管理者側）、`Admin/AdminAllocationApiTest`、`Admin/BusyConversionTest`
 - E2E `e2e/tests/admin-allocations.spec.ts`: 403 / 401、塗って保存、一般利用者の購入不可、ロック表示、他の管理者との競合。
-  `afterAll` でカートと割当を開始時の値に戻す
+  `afterAll` でカートと割当を開始時の値に戻す。入口（画面上部のユーザー切替を操作してからの 403 / 401、管理画面を開いたまま一般ユーザーに
+  切り替えると権限なしの表示に変わる、`/matches/admin` の 404）は割当に依存しないので別の describe に分けている
+- 実 UI のユーザー切替（Server Action で cookie を変える）の後に `goto` するテストは、バーに切替後のユーザー名が出るまで待つ。
+  待たないと古い cookie のまま遷移する
 
 ### 申し送り
 
 - E2E は未販売の試合に依存する。2026-11-28 / 12-05 のキックオフを過ぎると編集できる試合が無くなり、`pickEditableUnsoldMatch` が理由付きで落ちる。
   `MatchSeeder::fixtures()` の未販売分の日付を先へずらして `AddUnsoldMatchesSeeder` を流し直す（kickoff で同一判定しているので、日付を変えると別の試合として増える）
 - 一般利用者の座席図の「購入不可」は色とカーソルだけで、文言が無い（E2E は `data-allocation` で見ている）
+- ルートの `app/not-found.tsx`（日本語）を足した。それまでは `/matches/admin` のような打ち間違いで Next 既定の英語の 404 が出て、
+  管理画面の不具合と見分けにくかった（ブラウザ確認で実際に取り違えた）。確認手順の URL は `http://localhost:3100/admin` のように全部書く
 - demo 有効時は cookie を管理者の id に書き換えれば誰でも管理者になれる（demo guard の前提どおり）。本物の認証は `auth:demo` の差し替えから
 - CORS は `CORS_ALLOWED_ORIGINS`（既定 `http://localhost:3100`）に限定した。ブラウザから API を直接呼ぶ箇所は無い
 - `{match}` / `{block}` は `Route::pattern` で数値に限定している（非数値は 404）
