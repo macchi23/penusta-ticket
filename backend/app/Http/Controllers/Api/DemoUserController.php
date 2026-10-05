@@ -37,6 +37,7 @@ class DemoUserController extends Controller
                 $escaped = addcslashes($q, '\\%_');
                 $query->where('name', 'ilike', "%{$escaped}%");
             })
+            ->orderByRaw("case when role = 'admin' then 0 else 1 end")
             ->orderBy('id')
             ->limit($limit)
             ->get();

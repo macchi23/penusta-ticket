@@ -73,7 +73,7 @@ class GenerateDemoData extends Command
         DB::table('tickets')->delete();
         DB::table('orders')->delete();
         DB::table('memberships')->delete();
-        DB::table('users')->where('email', '!=', 'test@example.com')->delete();
+        DB::table('users')->where('email', '!=', 'test@example.com')->where('role', '!=', 'admin')->delete();
     }
 
     /**

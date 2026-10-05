@@ -8,6 +8,7 @@ use App\Services\ActivityRecorder;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 
@@ -36,6 +37,8 @@ class AppServiceProvider extends ServiceProvider
 
             return ctype_digit((string) $id) ? User::find((int) $id) : null;
         });
+
+        Gate::define('manage-allocations', fn (User $user) => $user->isAdmin());
 
         RateLimiter::for('cart', fn (Request $request) => Limit::perMinute((int) config('ticketing.cart_rate_per_minute'))
             ->by($request->user()?->id ?: $request->ip()));

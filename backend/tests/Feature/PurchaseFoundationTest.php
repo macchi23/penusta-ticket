@@ -150,6 +150,7 @@ class PurchaseFoundationTest extends TestCase
                 'gender' => 'male',
                 'birth_date' => '1990-04-01',
                 'prefecture' => 'Tokyo',
+                'role' => 'customer',
                 'memberships' => ['season_pass'],
             ]]);
     }

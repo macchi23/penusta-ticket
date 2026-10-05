@@ -19,6 +19,7 @@ class DemoUserResource extends JsonResource
             'gender' => $this->gender,
             'birth_date' => $this->birth_date?->toDateString(),
             'prefecture' => $this->prefecture,
+            'role' => $this->role->value,
             'memberships' => $this->memberships->pluck('kind')->values()->all(),
         ];
     }

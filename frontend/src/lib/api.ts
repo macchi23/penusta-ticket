@@ -61,7 +61,7 @@ export async function fetchJson<T>(path: string): Promise<T> {
   return res.json();
 }
 
-export type DemoUser = { id: number; name: string; gender: string | null; birth_date: string | null; prefecture: string | null; memberships: string[] };
+export type DemoUser = { id: number; name: string; gender: string | null; birth_date: string | null; prefecture: string | null; role: "customer" | "admin"; memberships: string[] };
 export type TicketType = { id: number; code: string; name: string };
 export type MatchPrice = { seat_category: string; ticket_type: TicketType; price: number };
 export type OrderStatus = "pending" | "paid" | "expired";
