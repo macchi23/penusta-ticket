@@ -20,6 +20,7 @@ use App\Models\TicketType;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
 
 class CheckoutTest extends TestCase
@@ -157,6 +158,28 @@ class CheckoutTest extends TestCase
         $this->assertSame('expired', $order->fresh()->status->value);
         $this->assertSame(3, Ticket::where('status', 'expired')->count());
         $this->assertSame(0, ActivityEvent::where('event_type', 'purchase')->count());
+    }
+
+    public function test_checkout_uses_time_taken_after_allocation_lock(): void
+    {
+        $order = $this->cartWithThree();
+        $this->travelTo(Carbon::parse('2026-06-01 00:09:59', 'UTC'));
+
+        // allocation のロック待ちの間に期限が過ぎた状況（ロック取得直後に時刻を進める）
+        $fired = false;
+        DB::listen(function ($query) use (&$fired) {
+            $sql = strtolower($query->sql);
+            if (! $fired && str_contains($sql, 'match_block_allocations') && str_contains($sql, 'for ')) {
+                $fired = true;
+                $this->travelTo(Carbon::parse('2026-06-01 00:10:00', 'UTC'));
+            }
+        });
+
+        $this->checkout($this->alice, $order)->assertStatus(409);
+
+        $this->assertTrue($fired);
+        $this->assertSame('expired', $order->fresh()->status->value);
+        $this->assertSame(0, Ticket::where('status', 'paid')->count());
     }
 
     public function test_empty_cart_is_422(): void

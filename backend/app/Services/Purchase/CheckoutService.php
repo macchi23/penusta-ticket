@@ -6,7 +6,6 @@ use App\Enums\OrderStatus;
 use App\Enums\TicketStatus;
 use App\Exceptions\PurchaseException;
 use App\Models\Block;
-use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -23,6 +22,7 @@ class CheckoutService
         private FirstComeSaleMethod $saleMethod,
         private DbHoldExpiry $holdExpiry,
         private MockPaymentGateway $gateway,
+        private AllocationLocks $locks,
     ) {}
 
     /**
@@ -37,36 +37,32 @@ class CheckoutService
                 ->lockForUpdate()
                 ->first() ?? throw new ModelNotFoundException;
 
-            // ロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
-            $now = CarbonImmutable::now();
-
+            // Paid は何も消費し直さないので allocation をロックせず返す（待たされない）
             if ($order->status === OrderStatus::Paid) {
-                return new CheckoutResult($order, false, 0, $now);
+                return new CheckoutResult($order, false, 0, CarbonImmutable::now());
             }
-
-            if ($order->status === OrderStatus::Expired
-                || ($order->expires_at !== null && $order->expires_at <= $now)) {
-                if ($order->status === OrderStatus::Pending) {
-                    $this->holdExpiry->expireCart($order->id, $now);
-                }
-
-                // 回収をコミットするため、例外はトランザクションの外で投げる
+            if ($order->status === OrderStatus::Expired) {
                 return PurchaseException::cartExpired();
             }
 
-            // ロック順は仮押さえ側と同じ: カート行 → allocation 行 → tickets
-            $unreservedBlockIds = Ticket::query()
+            // ロック順は仮押さえ側と同じ: カート行 → allocation 行（block_id 昇順）→ tickets
+            // 確定対象になりうる held のブロックだけロックする（released / expired のブロックは握らない）
+            $blocks = Block::whereIn('id', Ticket::query()
                 ->whereIn('id', OrderItem::where('order_id', $order->id)->select('ticket_id'))
-                ->whereIn('block_id', Block::where('seating_type', 'unreserved')->select('id'))
-                ->distinct()
-                ->orderBy('block_id')
-                ->pluck('block_id');
-            if ($unreservedBlockIds->isNotEmpty()) {
-                MatchBlockAllocation::where('match_id', $order->match_id)
-                    ->whereIn('block_id', $unreservedBlockIds)
-                    ->orderBy('block_id')
-                    ->lockForUpdate()
-                    ->get();
+                ->where('status', TicketStatus::Held->value)
+                ->select('block_id'))
+                ->orderBy('id')
+                ->get();
+            $allocations = $this->locks->forPurchase($order->match_id, $blocks);
+
+            // allocation のロック待ちの間に期限が過ぎうるので、時刻はロック取得後に取る
+            $now = CarbonImmutable::now();
+
+            if ($order->expires_at !== null && $order->expires_at <= $now) {
+                $this->holdExpiry->expireCart($order->id, $now);
+
+                // 回収をコミットするため、例外はトランザクションの外で投げる
+                return PurchaseException::cartExpired();
             }
 
             $tickets = Ticket::query()
@@ -98,9 +94,7 @@ class CheckoutService
             $total = 0;
             foreach ($items as $item) {
                 $block = $item->ticket->block;
-                $allocation = MatchBlockAllocation::where('match_id', $match->id)
-                    ->where('block_id', $block->id)
-                    ->value('allocation') ?? 'closed';
+                $allocation = $allocations[$block->id] ?? 'closed';
                 $this->saleMethod->assertSellable($match, $allocation);
                 $this->saleMethod->assertTicketType($item->ticketType);
 

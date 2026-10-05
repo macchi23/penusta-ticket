@@ -26,6 +26,7 @@ class CartService
         private FirstComeSaleMethod $saleMethod,
         private DbUnreservedStock $unreservedStock,
         private DbHoldExpiry $holdExpiry,
+        private AllocationLocks $locks,
     ) {}
 
     /**
@@ -80,9 +81,10 @@ class CartService
                 }
             }
 
-            $allocation = MatchBlockAllocation::where('match_id', $match->id)
-                ->where('block_id', $block->id)
-                ->value('allocation') ?? 'closed';
+            // チケットを作る前に allocation 行をロックし、ロックした読み取りの値で判定する
+            $allocation = $this->locks->forPurchase($match->id, [$block])[$block->id];
+            // $now は取り直さない（checkout はロック後に取る）。カート期限の判定は orders ロック直後の $now で
+            // 済んでおり、ここで進めると期限切れ held を残したまま expires_at だけ延長しうる。
 
             $heldCount = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
             $this->saleMethod->assertCanHold($user, $match, $block, $allocation, $heldCount, $type);
@@ -138,35 +140,49 @@ class CartService
             $now = CarbonImmutable::now();
             $cart = $this->ensureCart($locked, $user, $match, $now);
 
-            $blockItems = OrderItem::with('ticket')
-                ->where('order_id', $cart->id)
-                ->whereIn('ticket_id', $this->liveTickets($cart, $now)
-                    ->where('status', TicketStatus::Held->value)
-                    ->where('block_id', $block->id)
-                    ->select('id'))
-                ->orderByDesc('id')
-                ->get();
+            // 書き込みより前に差分だけを計算する（ロック順: orders → allocation → tickets を守るため）
+            $plan = function () use ($cart, $block, $wanted, $now) {
+                $blockItems = OrderItem::with('ticket')
+                    ->where('order_id', $cart->id)
+                    ->whereIn('ticket_id', $this->liveTickets($cart, $now)
+                        ->where('status', TicketStatus::Held->value)
+                        ->where('block_id', $block->id)
+                        ->select('id'))
+                    ->orderByDesc('id')
+                    ->get();
 
-            $heldBefore = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
+                $heldBefore = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
 
-            $released = 0;
-            $adds = [];
-            $addTotal = 0;
-            foreach ($wanted as [$type, $quantity, $price]) {
-                $mine = $blockItems->where('ticket_type_id', $type->id)->values();
-                $delta = $quantity - $mine->count();
-                if ($delta < 0) {
-                    $drop = $mine->take(-$delta);
-                    Ticket::whereIn('id', $drop->pluck('ticket_id'))
-                        ->update(['status' => TicketStatus::Released->value, 'updated_at' => $now]);
-                    $released += $drop->count();
-                } elseif ($delta > 0) {
-                    $adds[] = [$type, $price, $delta];
-                    $addTotal += $delta;
+                $drops = collect();
+                $adds = [];
+                $addTotal = 0;
+                foreach ($wanted as [$type, $quantity, $price]) {
+                    $mine = $blockItems->where('ticket_type_id', $type->id)->values();
+                    $delta = $quantity - $mine->count();
+                    if ($delta < 0) {
+                        $drops = $drops->merge($mine->take(-$delta));
+                    } elseif ($delta > 0) {
+                        $adds[] = [$type, $price, $delta];
+                        $addTotal += $delta;
+                    }
                 }
+
+                return [$heldBefore, $drops, $adds, $addTotal];
+            };
+
+            [$heldBefore, $drops, $adds, $addTotal] = $plan();
+            if ($addTotal > 0) {
+                $this->locks->forPurchase($match->id, [$block]);
+                // $now は取り直さない（addItem と同じ理由）
             }
 
-            $heldCount = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
+            $released = $drops->count();
+            if ($released > 0) {
+                Ticket::whereIn('id', $drops->pluck('ticket_id'))
+                    ->update(['status' => TicketStatus::Released->value, 'updated_at' => $now]);
+            }
+
+            $heldCount = $heldBefore - $released;
             $max = (int) config('ticketing.max_tickets_per_order');
             if ($heldCount + $addTotal > $max) {
                 throw PurchaseException::cartLimitReached($max);
