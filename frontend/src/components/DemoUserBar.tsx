@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { cookies } from "next/headers";
 import { ApiHttpError, apiGet } from "@/lib/server-api";
 import { DEMO_USER_COOKIE, isDemoAuthEnabled } from "@/lib/demo-auth";
@@ -31,6 +32,11 @@ export default async function DemoUserBar() {
       <span>
         <span className="mr-2 font-semibold">DEV</span>
         {current ? current.name : "ユーザー未選択"}
+        {current?.role === "admin" && (
+          <Link href="/admin" className="ml-3 underline">
+            管理画面
+          </Link>
+        )}
         {listFailed && <span className="ml-3 text-red-700">ユーザー一覧を取得できません</span>}
       </span>
       <DemoUserSwitcher
