@@ -24,27 +24,30 @@ class AllocationSeeder extends Seeder
         $bigAwayTemplate = AllocationTemplate::create(['stadium_id' => $stadium->id, 'name' => '大規模アウェー配置']);
         $this->createEntries($bigAwayTemplate, $blocks, awayCodes: ['S1', 'S2'], bufferCodes: ['S3']);
 
-        $matches = FootballMatch::all();
+        foreach (FootballMatch::all() as $match) {
+            $this->allocateMatch($match, $normalTemplate, $bigAwayTemplate);
+        }
+    }
 
-        foreach ($matches as $match) {
-            $isBigMatch = ($match->attributes['opponent_popularity'] ?? 1) >= 5;
-            $template = $isBigMatch ? $bigAwayTemplate : $normalTemplate;
+    public function allocateMatch(FootballMatch $match, AllocationTemplate $normalTemplate, AllocationTemplate $bigAwayTemplate): void
+    {
+        $isBigMatch = ($match->attributes['opponent_popularity'] ?? 1) >= 5;
+        $template = $isBigMatch ? $bigAwayTemplate : $normalTemplate;
 
-            $rows = [];
-            $now = now();
-            foreach ($template->entries as $entry) {
-                $rows[] = [
-                    'match_id' => $match->id,
-                    'block_id' => $entry->block_id,
-                    'allocation' => $entry->allocation,
-                    'created_at' => $now,
-                    'updated_at' => $now,
-                ];
-            }
+        $rows = [];
+        $now = now();
+        foreach ($template->entries as $entry) {
+            $rows[] = [
+                'match_id' => $match->id,
+                'block_id' => $entry->block_id,
+                'allocation' => $entry->allocation,
+                'created_at' => $now,
+                'updated_at' => $now,
+            ];
+        }
 
-            foreach (array_chunk($rows, 500) as $chunk) {
-                MatchBlockAllocation::insert($chunk);
-            }
+        foreach (array_chunk($rows, 500) as $chunk) {
+            MatchBlockAllocation::insert($chunk);
         }
     }
 

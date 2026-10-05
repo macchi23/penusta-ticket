@@ -13,12 +13,20 @@ class PriceSeeder extends Seeder
 {
     public function run(): void
     {
-        $adult = TicketType::create(['name' => '大人', 'code' => 'adult', 'display_order' => 1]);
-        $youth = TicketType::create(['name' => '小中高', 'code' => 'youth', 'display_order' => 2]);
-        $seasonPass = TicketType::create(['name' => '年パス引換', 'code' => 'season_pass', 'display_order' => 3]);
+        TicketType::create(['name' => '大人', 'code' => 'adult', 'display_order' => 1]);
+        TicketType::create(['name' => '小中高', 'code' => 'youth', 'display_order' => 2]);
+        TicketType::create(['name' => '年パス引換', 'code' => 'season_pass', 'display_order' => 3]);
 
+        foreach (FootballMatch::all() as $match) {
+            $this->priceMatch($match);
+        }
+    }
+
+    public function priceMatch(FootballMatch $match): void
+    {
         $stadium = Stadium::firstOrFail();
         $categories = SeatCategory::where('stadium_id', $stadium->id)->get()->keyBy('name');
+        $ticketTypes = TicketType::whereIn('code', ['adult', 'youth', 'season_pass'])->orderBy('display_order')->get();
 
         // カテゴリー名 => [大人, 小中高, 年パス引換]
         $basePrices = [
@@ -28,34 +36,30 @@ class PriceSeeder extends Seeder
             'ゴール裏' => [3500, 1500, 0],
         ];
 
-        $ticketTypes = [$adult, $youth, $seasonPass];
-
         $now = now();
-        foreach (FootballMatch::all() as $match) {
-            $isBigMatch = ($match->attributes['opponent_popularity'] ?? 1) >= 5;
-            $rows = [];
+        $isBigMatch = ($match->attributes['opponent_popularity'] ?? 1) >= 5;
+        $rows = [];
 
-            foreach ($basePrices as $categoryName => $prices) {
-                $category = $categories[$categoryName];
+        foreach ($basePrices as $categoryName => $prices) {
+            $category = $categories[$categoryName];
 
-                foreach ($ticketTypes as $index => $ticketType) {
-                    $price = $prices[$index];
-                    if ($price > 0 && $isBigMatch) {
-                        $price += 500;
-                    }
-
-                    $rows[] = [
-                        'match_id' => $match->id,
-                        'seat_category_id' => $category->id,
-                        'ticket_type_id' => $ticketType->id,
-                        'price' => $price,
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ];
+            foreach ($ticketTypes as $index => $ticketType) {
+                $price = $prices[$index];
+                if ($price > 0 && $isBigMatch) {
+                    $price += 500;
                 }
-            }
 
-            MatchPrice::insert($rows);
+                $rows[] = [
+                    'match_id' => $match->id,
+                    'seat_category_id' => $category->id,
+                    'ticket_type_id' => $ticketType->id,
+                    'price' => $price,
+                    'created_at' => $now,
+                    'updated_at' => $now,
+                ];
+            }
         }
+
+        MatchPrice::insert($rows);
     }
 }

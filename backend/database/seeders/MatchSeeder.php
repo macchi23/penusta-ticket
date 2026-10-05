@@ -8,6 +8,7 @@ use App\Models\Stadium;
 use App\Models\Team;
 use Carbon\Carbon;
 use Illuminate\Database\Seeder;
+use Illuminate\Support\Collection;
 
 class MatchSeeder extends Seeder
 {
@@ -18,8 +19,22 @@ class MatchSeeder extends Seeder
         $homeTeam = Team::where('is_home_club', true)->firstOrFail();
         $awayTeams = Team::where('is_home_club', false)->orderBy('id')->get();
 
-        // [date, kickoff hour, section number, opponent_popularity]
-        $fixtures = [
+        foreach (self::fixtures() as $i => $fixture) {
+            $this->createMatch($season, $stadium, $homeTeam, $awayTeams, $i, $fixture);
+        }
+    }
+
+    /**
+     * 未販売（tickets を作らない）の印は attributes.unsold。GenerateDemoData がこれを見てスキップする。
+     */
+    public const UNSOLD_KEY = 'unsold';
+
+    /**
+     * @return array<int, array{0:string, 1:int, 2:int, 3:int, 4?:bool}> [date, kickoff hour, section number, opponent_popularity, unsold]
+     */
+    public static function fixtures(): array
+    {
+        return [
             ['2026-03-07', 19, 2, 3],
             ['2026-03-21', 14, 4, 2],
             ['2026-04-11', 19, 6, 4],
@@ -30,29 +45,42 @@ class MatchSeeder extends Seeder
             ['2026-08-30', 14, 24, 5],
             ['2026-09-26', 19, 27, 3],
             ['2026-11-21', 14, 33, 5],
+            ['2026-11-28', 14, 37, 3, true],
+            ['2026-12-05', 14, 38, 4, true],
         ];
+    }
 
-        foreach ($fixtures as $i => [$date, $hour, $section, $popularity]) {
-            // DBはUTC統一。JSTの開催時刻をUTCへ変換してから保存する
-            $kickoff = Carbon::parse($date, 'Asia/Tokyo')->setTime($hour, 0)->utc();
-            $awayTeam = $awayTeams[$i % $awayTeams->count()];
+    public static function kickoffOf(string $date, int $hour): Carbon
+    {
+        // DBはUTC統一。JSTの開催時刻をUTCへ変換してから保存する
+        return Carbon::parse($date, 'Asia/Tokyo')->setTime($hour, 0)->utc();
+    }
 
-            FootballMatch::create([
-                'season_id' => $season->id,
-                'home_team_id' => $homeTeam->id,
-                'away_team_id' => $awayTeam->id,
-                'stadium_id' => $stadium->id,
-                'kickoff_at' => $kickoff,
-                'status' => 'on_sale',
-                'section_label' => '第'.$section.'節',
-                'attributes' => [
-                    'weather' => $this->weatherFor($kickoff),
-                    'temperature' => $this->temperatureFor($kickoff),
-                    'day_type' => in_array($kickoff->dayOfWeek, [0, 6], true) ? 'weekend' : 'weekday',
-                    'opponent_popularity' => $popularity,
-                ],
-            ]);
-        }
+    /**
+     * @param  Collection<int, Team>  $awayTeams
+     * @param  array{0:string, 1:int, 2:int, 3:int, 4?:bool}  $fixture
+     */
+    public function createMatch(Season $season, Stadium $stadium, Team $homeTeam, $awayTeams, int $index, array $fixture): FootballMatch
+    {
+        [$date, $hour, $section, $popularity] = $fixture;
+        $kickoff = self::kickoffOf($date, $hour);
+        $awayTeam = $awayTeams[$index % $awayTeams->count()];
+
+        return FootballMatch::create([
+            'season_id' => $season->id,
+            'home_team_id' => $homeTeam->id,
+            'away_team_id' => $awayTeam->id,
+            'stadium_id' => $stadium->id,
+            'kickoff_at' => $kickoff,
+            'status' => 'on_sale',
+            'section_label' => '第'.$section.'節',
+            'attributes' => [
+                'weather' => $this->weatherFor($kickoff),
+                'temperature' => $this->temperatureFor($kickoff),
+                'day_type' => in_array($kickoff->dayOfWeek, [0, 6], true) ? 'weekend' : 'weekday',
+                'opponent_popularity' => $popularity,
+            ] + (($fixture[4] ?? false) ? [self::UNSOLD_KEY => true] : []),
+        ]);
     }
 
     private function weatherFor(Carbon $kickoff): string

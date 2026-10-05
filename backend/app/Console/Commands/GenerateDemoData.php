@@ -8,6 +8,7 @@ use App\Models\MatchPrice;
 use App\Models\Seat;
 use App\Models\TicketType;
 use Carbon\Carbon;
+use Database\Seeders\MatchSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -58,12 +59,35 @@ class GenerateDemoData extends Command
         $priceMap = $this->buildPriceMap();
 
         foreach ($matches as $match) {
-            $this->generateForMatch($match, $blocks, $seatsByBlock, $allocationsByMatch, $priceMap, $ticketTypeIds);
+            $this->generateOrSkip($match, $blocks, $seatsByBlock, $allocationsByMatch, $priceMap, $ticketTypeIds);
         }
 
         $this->info('完了しました。');
 
         return self::SUCCESS;
+    }
+
+    /**
+     * 未販売の試合は何も生成しない。スキップ時は mt_rand も shuffle も呼ばないので、乱数列は試合の位置に依存せず変わらない。
+     *
+     * @param  Collection<int, Block>  $blocks
+     * @param  Collection<int, Collection>  $seatsByBlock
+     * @param  Collection<int, Collection>  $allocationsByMatch
+     * @param  array<int, array<int, array<int, int>>>  $priceMap
+     * @param  Collection<string, int>  $ticketTypeIds
+     */
+    public function generateOrSkip(FootballMatch $match, $blocks, $seatsByBlock, $allocationsByMatch, array $priceMap, $ticketTypeIds): void
+    {
+        if ($this->isUnsold($match)) {
+            return;
+        }
+
+        $this->generateForMatch($match, $blocks, $seatsByBlock, $allocationsByMatch, $priceMap, $ticketTypeIds);
+    }
+
+    public function isUnsold(FootballMatch $match): bool
+    {
+        return ($match->attributes[MatchSeeder::UNSOLD_KEY] ?? false) === true;
     }
 
     private function cleanup(): void
