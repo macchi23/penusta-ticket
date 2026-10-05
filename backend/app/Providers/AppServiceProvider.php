@@ -10,6 +10,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\RateLimiter;
+use Illuminate\Support\Facades\Route;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -42,6 +43,16 @@ class AppServiceProvider extends ServiceProvider
 
         RateLimiter::for('cart', fn (Request $request) => Limit::perMinute((int) config('ticketing.cart_rate_per_minute'))
             ->by($request->user()?->id ?: $request->ip()));
+
+        RateLimiter::for('admin-read', fn (Request $request) => Limit::perMinute((int) config('ticketing.admin_read_rate_per_minute'))
+            ->by($request->user()?->id ?: $request->ip()));
+
+        RateLimiter::for('admin-write', fn (Request $request) => Limit::perMinute((int) config('ticketing.admin_update_rate_per_minute'))
+            ->by($request->user()?->id ?: $request->ip()));
+
+        // 数値以外の id は 22P02（500）にせず 404 にする
+        Route::pattern('match', '[0-9]+');
+        Route::pattern('block', '[0-9]+');
 
         RateLimiter::for('events', function (Request $request) {
             $session = $request->header('X-Session-Id');

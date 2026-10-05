@@ -1,14 +1,17 @@
 // サーバー専用: cookie を読んで Laravel を呼ぶ。Client Component から import しないこと。
 import { cookies } from "next/headers";
 import { apiBase } from "@/lib/api";
-import type { ActionResult, ApiError, ApiErrorCode } from "@/lib/api";
+import type { ActionResult, AllocationConflict, ApiError, ApiErrorCode } from "@/lib/api";
 import { DEMO_USER_COOKIE, isDemoAuthEnabled } from "@/lib/demo-auth";
 
-const API_ERROR_CODES = [
-  "seat_unavailable", "sold_out", "cart_expired",
-  "cart_limit_reached", "not_on_sale", "price_not_found", "cart_empty",
-  "payment_declined", "user_required", "validation_failed", "unknown",
-] as const satisfies readonly ApiErrorCode[];
+// ApiErrorCode の全要素を過不足なく列挙させる（足りない / 余るとコンパイルエラー）
+const API_ERROR_CODE_MAP: Record<ApiErrorCode, true> = {
+  seat_unavailable: true, sold_out: true, cart_expired: true,
+  cart_limit_reached: true, not_on_sale: true, price_not_found: true, cart_empty: true,
+  payment_declined: true, user_required: true, validation_failed: true, unknown: true,
+  allocation_conflict: true, match_locked: true, allocation_busy: true, busy: true,
+};
+const API_ERROR_CODES = Object.keys(API_ERROR_CODE_MAP) as ApiErrorCode[];
 
 export class ApiHttpError extends Error {
   constructor(public status: number, path: string) {
@@ -48,10 +51,18 @@ const FALLBACK_MESSAGES: Partial<Record<ApiErrorCode, string>> = {
 };
 
 function toApiError(status: number, body: unknown): ApiError {
-  const b = (body ?? {}) as { message?: unknown; code?: unknown };
+  const b = (body ?? {}) as { message?: unknown; code?: unknown; details?: unknown };
   if (typeof b.code === "string" && (API_ERROR_CODES as readonly string[]).includes(b.code)) {
     const code = b.code as ApiErrorCode;
-    return { code, message: typeof b.message === "string" ? b.message : FALLBACK_MESSAGES[code] ?? "エラーが発生しました" };
+    const error: ApiError = {
+      code,
+      message: typeof b.message === "string" ? b.message : FALLBACK_MESSAGES[code] ?? "エラーが発生しました",
+    };
+    const blocks = (b.details as { blocks?: unknown } | null | undefined)?.blocks;
+    if (code === "allocation_conflict" && Array.isArray(blocks)) {
+      error.details = { blocks: blocks as AllocationConflict[] };
+    }
+    return error;
   }
   // 契約外の code は backend の message を載せない（例外内容の漏えい防止）
   const code: ApiErrorCode =

@@ -5,6 +5,8 @@ return [
     'hold_minutes' => (int) env('TICKETING_HOLD_MINUTES', 10),
 
     // カート操作のレート制限（1 ユーザーあたり、1 分間の回数）
+    'admin_update_rate_per_minute' => (int) env('TICKETING_ADMIN_UPDATE_RATE_PER_MINUTE', 30),
+    'admin_read_rate_per_minute' => (int) env('TICKETING_ADMIN_READ_RATE_PER_MINUTE', 120),
     'cart_rate_per_minute' => (int) env('TICKETING_CART_RATE_PER_MINUTE', 60),
 
     // 閲覧イベント記録のレート制限（IP + セッションあたり、1 分間の回数）

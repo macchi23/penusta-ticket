@@ -1,6 +1,8 @@
 <?php
 
 use App\Http\Controllers\Api\ActivityEventController;
+use App\Http\Controllers\Api\Admin\AllocationController;
+use App\Http\Controllers\Api\Admin\MatchController as AdminMatchController;
 use App\Http\Controllers\Api\BlockController;
 use App\Http\Controllers\Api\CartController;
 use App\Http\Controllers\Api\CheckoutController;
@@ -39,3 +41,12 @@ Route::get('/me', [DemoUserController::class, 'me'])->middleware('auth:demo');
 if (DemoUserController::demoEnabled()) {
     Route::get('/demo/users', [DemoUserController::class, 'index']);
 }
+
+// 管理者向け。認証方式を差し替えるときはここのミドルウェアだけを直す
+Route::middleware(['auth:demo', 'can:manage-allocations'])->prefix('admin')->group(function () {
+    Route::middleware('throttle:admin-read')->group(function () {
+        Route::get('/matches', [AdminMatchController::class, 'index']);
+        Route::get('/matches/{match}/allocations', [AllocationController::class, 'show']);
+    });
+    Route::patch('/matches/{match}/allocations', [AllocationController::class, 'update'])->middleware('throttle:admin-write');
+});

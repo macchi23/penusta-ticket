@@ -35,6 +35,35 @@ export type SeatMap = {
   blocks: BlockInfo[];
 };
 
+export type AdminMatch = Match & { editable: boolean };
+export type TicketCounts = { paid: number; held: number };
+export type AdminBlock = {
+  id: number;
+  code: string;
+  stand: string;
+  seating_type: "reserved" | "unreserved";
+  seat_category: string;
+  capacity: number;
+  geometry: { x: number; y: number; w: number; h: number };
+  allocation: Allocation;
+  tickets: TicketCounts;
+  locked: boolean;
+};
+export type AdminAllocations = {
+  match: Match;
+  editable: boolean;
+  viewbox: { width: number; height: number };
+  blocks: AdminBlock[];
+};
+export type AllocationChange = { block_id: number; expected: Allocation; allocation: Allocation };
+export type AllocationUpdateResult = AdminAllocations & { change_set_id: string };
+export type AllocationConflict = {
+  block_id: number;
+  reason: "stale" | "has_tickets";
+  current: Allocation;
+  tickets: TicketCounts;
+};
+
 export type SeatStatus = "available" | "held" | "sold";
 
 export type BlockSeats = {
@@ -89,7 +118,8 @@ export type UnreservedQuantity = { ticket_type_id: number; quantity: number };
 export type ApiErrorCode =
   | "seat_unavailable" | "sold_out" | "cart_expired"
   | "cart_limit_reached" | "not_on_sale" | "price_not_found" | "cart_empty"
-  | "payment_declined" | "user_required" | "validation_failed" | "unknown";
-export type ApiError = { code: ApiErrorCode; message: string };
+  | "payment_declined" | "user_required" | "validation_failed" | "unknown"
+  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy";
+export type ApiError = { code: ApiErrorCode; message: string; details?: { blocks?: AllocationConflict[] } };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export type SeatDisplayStatus = SeatStatus | "mine";

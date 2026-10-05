@@ -1,5 +1,7 @@
 <?php
 
+use App\Exceptions\AllocationChangeException;
+use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -19,4 +21,22 @@ return Application::configure(basePath: dirname(__DIR__))
         $exceptions->shouldRenderJsonWhen(
             fn (Request $request) => $request->is('api/*') || $request->expectsJson(),
         );
+
+        $exceptions->render(function (AllocationChangeException $e, Request $request) {
+            $body = ['code' => $e->errorCode, 'message' => $e->getMessage()];
+            if ($e->conflicts !== []) {
+                $body['details'] = ['blocks' => $e->conflicts];
+            }
+
+            return response()->json($body, $e->status);
+        });
+
+        // allocation ロック待ち（lock_not_available）とデッドロック再試行枯渇は、SQL を出さずに 503 で返す
+        $exceptions->render(function (QueryException $e, Request $request) {
+            if (! $request->is('api/*') || ! in_array($e->getCode(), ['55P03', '40P01'], true)) {
+                return null;
+            }
+
+            return response()->json(['code' => 'busy', 'message' => '混み合っています。しばらくしてからやり直してください。'], 503);
+        });
     })->create();
