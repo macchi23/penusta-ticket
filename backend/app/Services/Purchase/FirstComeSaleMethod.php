@@ -2,6 +2,7 @@
 
 namespace App\Services\Purchase;
 
+use App\Enums\Allocation;
 use App\Exceptions\PurchaseException;
 use App\Models\Block;
 use App\Models\FootballMatch;
@@ -36,7 +37,7 @@ class FirstComeSaleMethod
 
     public function assertAllocationSellable(string $allocation): void
     {
-        if (! in_array($allocation, ['home', 'away'], true)) {
+        if (! Allocation::tryFrom($allocation)?->isSellable()) {
             throw PurchaseException::notOnSale();
         }
     }

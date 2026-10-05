@@ -8,12 +8,7 @@ use App\Models\FootballMatch;
 use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
 use App\Models\Order;
-use App\Models\Season;
 use App\Models\Seat;
-use App\Models\SeatCategory;
-use App\Models\Stadium;
-use App\Models\Stand;
-use App\Models\Team;
 use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\User;
@@ -21,10 +16,11 @@ use App\Services\Purchase\AllocationLocks;
 use App\Services\Purchase\CartService;
 use App\Services\Purchase\CheckoutService;
 use Carbon\CarbonImmutable;
-use Illuminate\Database\Connection;
 use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\BuildsSaleFixture;
+use Tests\Concerns\UsesProbeConnection;
 use Tests\TestCase;
 
 /**
@@ -34,7 +30,9 @@ use Tests\TestCase;
  */
 class AllocationLockTest extends TestCase
 {
+    use BuildsSaleFixture;
     use DatabaseTruncation;
+    use UsesProbeConnection;
 
     private FootballMatch $match;
 
@@ -53,57 +51,25 @@ class AllocationLockTest extends TestCase
     /** @var array<int, Seat> */
     private array $seats = [];
 
-    private ?Connection $probe = null;
-
     protected function setUp(): void
     {
         parent::setUp();
         $this->travelTo(CarbonImmutable::parse('2026-06-01 00:00:00', 'UTC'));
 
-        $stadium = Stadium::create(['name' => 'Test Stadium', 'short_name' => 'TS']);
-        $stand = Stand::create(['stadium_id' => $stadium->id, 'name' => 'Main', 'code' => 'M']);
-        $category = SeatCategory::create(['stadium_id' => $stadium->id, 'name' => 'S席', 'display_order' => 1]);
-        $season = Season::create(['name' => 'Season 2026', 'year' => 2026]);
-        $home = Team::create(['name' => 'H', 'short_name' => 'H', 'color' => '#000000', 'is_home_club' => true]);
-        $away = Team::create(['name' => 'A', 'short_name' => 'A', 'color' => '#ffffff', 'is_home_club' => false]);
-
-        $this->match = FootballMatch::create([
-            'season_id' => $season->id, 'home_team_id' => $home->id, 'away_team_id' => $away->id,
-            'stadium_id' => $stadium->id, 'kickoff_at' => CarbonImmutable::parse('2030-03-01 10:00:00', 'UTC'),
-            'status' => 'on_sale', 'section_label' => 'A',
-        ]);
+        $this->buildSaleFixture();
 
         // block_id の昇順が reserved, free, reserved2, free2 になるよう作る
-        $this->reserved = $this->makeBlock($stand, $category, 'M1', 'reserved', 10);
-        $this->free = $this->makeBlock($stand, $category, 'F1', 'unreserved', 5);
-        $this->reserved2 = $this->makeBlock($stand, $category, 'M2', 'reserved', 10);
-        $this->free2 = $this->makeBlock($stand, $category, 'F2', 'unreserved', 5);
+        $this->reserved = $this->makeBlock('M1', 'reserved', 10);
+        $this->free = $this->makeBlock('F1', 'unreserved', 5);
+        $this->reserved2 = $this->makeBlock('M2', 'reserved', 10);
+        $this->free2 = $this->makeBlock('F2', 'unreserved', 5);
 
         foreach ([1, 2] as $n) {
             $this->seats[$n] = Seat::create(['block_id' => $this->reserved->id, 'row_label' => 'A', 'number' => $n]);
         }
         $this->seats[3] = Seat::create(['block_id' => $this->reserved2->id, 'row_label' => 'A', 'number' => 1]);
 
-        $this->adult = TicketType::create(['name' => '大人', 'code' => 'adult', 'display_order' => 1]);
-        MatchPrice::create(['match_id' => $this->match->id, 'seat_category_id' => $category->id,
-            'ticket_type_id' => $this->adult->id, 'price' => 5000]);
-
-        $this->alice = User::create(['name' => 'Alice', 'email' => 'a@example.com', 'password' => 'x']);
-    }
-
-    protected function tearDown(): void
-    {
-        if ($this->probe !== null) {
-            if ($this->probe->transactionLevel() > 0) {
-                $this->probe->rollBack();
-            }
-            DB::purge('probe');
-            $this->probe = null;
-        }
-        // 後続の RefreshDatabase 系テストの前提（空のテーブル）を壊さない
-        $this->truncateTablesForAllConnections();
-
-        parent::tearDown();
+        $this->buildSalePricesAndUser();
     }
 
     public function test_admin_style_update_lock_blocks_reserved_add_item(): void
@@ -304,17 +270,6 @@ class AllocationLockTest extends TestCase
         $this->assertSame([$this->free->id => 'closed', $this->free2->id => 'home'], $map);
     }
 
-    private function makeBlock(Stand $stand, SeatCategory $category, string $code, string $type, int $capacity): Block
-    {
-        $block = Block::create([
-            'stand_id' => $stand->id, 'seat_category_id' => $category->id, 'code' => $code,
-            'seating_type' => $type, 'capacity' => $capacity, 'geometry' => ['type' => 'rect'],
-        ]);
-        MatchBlockAllocation::create(['match_id' => $this->match->id, 'block_id' => $block->id, 'allocation' => 'home']);
-
-        return $block;
-    }
-
     private function addSeat(int $n)
     {
         return app(CartService::class)->addItem($this->alice, $this->match, $this->seats[$n]->id, null, $this->adult->id);
@@ -338,27 +293,6 @@ class AllocationLockTest extends TestCase
         }
 
         return Order::firstOrFail();
-    }
-
-    private function probeConnection(): Connection
-    {
-        if ($this->probe === null) {
-            config(['database.connections.probe' => config('database.connections.pgsql')]);
-            $this->probe = DB::connection('probe');
-        }
-
-        return $this->probe;
-    }
-
-    /** 別接続でトランザクションを開き、allocation 行を指定モードで握ったままにする。 */
-    private function probeLock(Block $block, string $mode): void
-    {
-        $probe = $this->probeConnection();
-        $probe->beginTransaction();
-        $probe->select(
-            "select id from match_block_allocations where match_id = ? and block_id = ? {$mode}",
-            [$this->match->id, $block->id],
-        );
     }
 
     private function shortLockTimeout(): void

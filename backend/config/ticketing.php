@@ -19,6 +19,9 @@ return [
     // 開発用ユーザー切替（なりすまし）。本番では必ず false
     'demo_auth_enabled' => (bool) env('DEMO_AUTH_ENABLED', false),
 
+    // 管理者の割当変更が allocation 行のロックを待つ上限（ミリ秒）
+    'admin_lock_timeout_ms' => (int) env('TICKETING_ADMIN_LOCK_TIMEOUT_MS', 3000),
+
     // 決済モックの結果（success / declined）
     'mock_payment_outcome' => env('TICKETING_MOCK_PAYMENT_OUTCOME', 'success'),
 ];
