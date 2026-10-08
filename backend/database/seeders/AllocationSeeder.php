@@ -19,10 +19,10 @@ class AllocationSeeder extends Seeder
         $blocks = Block::whereHas('stand', fn ($q) => $q->where('stadium_id', $stadium->id))->get()->keyBy('code');
 
         $normalTemplate = AllocationTemplate::create(['stadium_id' => $stadium->id, 'name' => '通常配置']);
-        $this->createEntries($normalTemplate, $blocks, awayCodes: ['S1'], bufferCodes: ['S2']);
+        $this->createEntries($normalTemplate, $blocks, awayCodes: ['S1', 'S2', 'S3', 'S4'], bufferCodes: ['S5']);
 
         $bigAwayTemplate = AllocationTemplate::create(['stadium_id' => $stadium->id, 'name' => '大規模アウェー配置']);
-        $this->createEntries($bigAwayTemplate, $blocks, awayCodes: ['S1', 'S2'], bufferCodes: ['S3']);
+        $this->createEntries($bigAwayTemplate, $blocks, awayCodes: ['S1', 'S2', 'S3', 'S4', 'S5', 'S6', 'S7', 'S8'], bufferCodes: ['S9']);
 
         foreach (FootballMatch::all() as $match) {
             $this->allocateMatch($match, $normalTemplate, $bigAwayTemplate);

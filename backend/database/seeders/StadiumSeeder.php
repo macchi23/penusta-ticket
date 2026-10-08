@@ -14,7 +14,9 @@ class StadiumSeeder extends Seeder
     /**
      * SVG viewbox is 1000x700. The pitch occupies x:250-750, y:210-490.
      */
-    private const UNIT = 58;
+    private const SIDE_W = 44;
+
+    private const GOAL_H = 32;
 
     public function run(): void
     {
@@ -33,9 +35,9 @@ class StadiumSeeder extends Seeder
         $category3 = SeatCategory::create(['stadium_id' => $stadium->id, 'name' => 'カテゴリー3', 'display_order' => 3]);
         $goalBack = SeatCategory::create(['stadium_id' => $stadium->id, 'name' => 'ゴール裏', 'display_order' => 4]);
 
-        // メインスタンド: M1-M8 指定席（x250-750に等間隔配置）。中央のM4,M5はカテゴリー1、それ以外はカテゴリー2。
-        $mainCentralCodes = ['M4', 'M5'];
-        foreach ($this->distributeHorizontal(250, 750, 8) as $i => $x) {
+        // メインスタンド: M1-M12 指定席。中央のM5-M8はカテゴリー1、それ以外はカテゴリー2。
+        $mainCentralCodes = ['M5', 'M6', 'M7', 'M8'];
+        foreach ($this->distributeHorizontal(210, 790, 12, self::SIDE_W) as $i => $x) {
             $code = 'M'.($i + 1);
             $this->createReservedBlock(
                 stand: $mainStand,
@@ -46,8 +48,8 @@ class StadiumSeeder extends Seeder
             );
         }
 
-        // バックスタンド: B1-B8 指定席（カテゴリー3）
-        foreach ($this->distributeHorizontal(250, 750, 8) as $i => $x) {
+        // バックスタンド: B1-B12 指定席（カテゴリー3）
+        foreach ($this->distributeHorizontal(210, 790, 12, self::SIDE_W) as $i => $x) {
             $this->createReservedBlock(
                 stand: $backStand,
                 seatCategory: $category3,
@@ -57,8 +59,8 @@ class StadiumSeeder extends Seeder
             );
         }
 
-        // 北スタンド（ホームゴール裏）: N1-N4 自由席（ゴール裏カテゴリー）
-        foreach ($this->distributeVertical(210, 490, 4) as $i => $y) {
+        // 北スタンド（ホームゴール裏）: N1-N16 自由席（ゴール裏カテゴリー）
+        foreach ($this->distributeVertical(80, 620, 16, self::GOAL_H) as $i => $y) {
             $this->createUnreservedBlock(
                 stand: $northStand,
                 seatCategory: $goalBack,
@@ -68,8 +70,8 @@ class StadiumSeeder extends Seeder
             );
         }
 
-        // 南スタンド: S1-S4 自由席（ゴール裏カテゴリー、アウェー側になりうる）
-        foreach ($this->distributeVertical(210, 490, 4) as $i => $y) {
+        // 南スタンド: S1-S16 自由席（ゴール裏カテゴリー、アウェー側になりうる）
+        foreach ($this->distributeVertical(80, 620, 16, self::GOAL_H) as $i => $y) {
             $this->createUnreservedBlock(
                 stand: $southStand,
                 seatCategory: $goalBack,
@@ -83,9 +85,8 @@ class StadiumSeeder extends Seeder
     /**
      * @return array<int, float>
      */
-    private function distributeHorizontal(float $start, float $end, int $count): array
+    private function distributeHorizontal(float $start, float $end, int $count, float $w): array
     {
-        $w = self::UNIT;
         $gap = ($end - $start - $count * $w) / max(1, $count - 1);
 
         $positions = [];
@@ -99,9 +100,9 @@ class StadiumSeeder extends Seeder
     /**
      * @return array<int, float>
      */
-    private function distributeVertical(float $start, float $end, int $count): array
+    private function distributeVertical(float $start, float $end, int $count, float $h): array
     {
-        return $this->distributeHorizontal($start, $end, $count);
+        return $this->distributeHorizontal($start, $end, $count, $h);
     }
 
     private function createReservedBlock(Stand $stand, SeatCategory $seatCategory, string $code, float $x, float $y): void
@@ -111,11 +112,11 @@ class StadiumSeeder extends Seeder
             'seat_category_id' => $seatCategory->id,
             'code' => $code,
             'seating_type' => 'reserved',
-            'capacity' => 200,
-            'geometry' => ['x' => round($x, 2), 'y' => $y, 'w' => self::UNIT, 'h' => 100],
+            'capacity' => 500,
+            'geometry' => ['x' => round($x, 2), 'y' => $y, 'w' => self::SIDE_W, 'h' => 100],
         ]);
 
-        $rows = range('A', 'J');
+        $rows = range('A', 'Y');
         $seats = [];
         $now = now();
         foreach ($rows as $row) {
@@ -142,8 +143,8 @@ class StadiumSeeder extends Seeder
             'seat_category_id' => $seatCategory->id,
             'code' => $code,
             'seating_type' => 'unreserved',
-            'capacity' => 500,
-            'geometry' => ['x' => $x, 'y' => round($y, 2), 'w' => 140, 'h' => self::UNIT],
+            'capacity' => 250,
+            'geometry' => ['x' => $x, 'y' => round($y, 2), 'w' => 140, 'h' => self::GOAL_H],
         ]);
     }
 }

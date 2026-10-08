@@ -28,9 +28,9 @@ export default function SeatGrid({
 }) {
   return (
     <div className="overflow-x-auto">
-      <div className="space-y-1">
+      <div className="space-y-[2px]">
         {blockSeats.rows.map((row) => (
-          <div key={row.row} className="flex items-center gap-1">
+          <div key={row.row} className="flex items-center gap-[2px]">
             <span className="w-6 shrink-0 text-right text-[10px] text-gray-500">{row.row}</span>
             {row.seats.map((s) => {
               const status: SeatDisplayStatus =
@@ -53,7 +53,7 @@ export default function SeatGrid({
                   onClick={() =>
                     status === "mine" ? onRelease(s.id) : onHold(s.id, row.row, s.number)
                   }
-                  className={`inline-block h-4 w-4 shrink-0 rounded-[2px] ${
+                  className={`inline-block h-3 w-3 shrink-0 rounded-[2px] ${
                     clickable ? "cursor-pointer" : "cursor-not-allowed"
                   }`}
                   style={{ backgroundColor: COLORS[status], opacity: pending ? 0.5 : 1 }}

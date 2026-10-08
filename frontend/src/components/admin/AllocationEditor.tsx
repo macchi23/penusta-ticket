@@ -29,6 +29,7 @@ export default function AllocationEditor({
   const [conflicts, setConflicts] = useState<AllocationConflict[]>([]);
   const [notice, setNotice] = useState<Notice | null>(null);
   const [pending, startTransition] = useTransition();
+  const [focusedBlockId, setFocusedBlockId] = useState<number | null>(null);
 
   const byId = new Map(blocks.map((b) => [b.id, b]));
   // props（元の値）と同じ下書きは差分に含めない
@@ -175,6 +176,8 @@ export default function AllocationEditor({
                 data-locked={b.locked}
                 onClick={() => paint(b)}
                 onKeyDown={(e) => onKeyDown(e, b)}
+                onFocus={(e) => setFocusedBlockId(e.currentTarget.matches(":focus-visible") ? b.id : null)}
+                onBlur={() => setFocusedBlockId(null)}
                 className={`group outline-none ${disabled ? "cursor-not-allowed" : "cursor-pointer"}`}
               >
                 <title>
@@ -191,19 +194,6 @@ export default function AllocationEditor({
                   strokeWidth={conflict || changed ? 3 : 1}
                   strokeDasharray={conflict ? "5 3" : changed ? "6 3" : undefined}
                   className={changed && !conflict ? "stroke-gray-900 dark:stroke-white" : undefined}
-                />
-                {/* キーボードフォーカス: 外側の水色リング（未保存・競合の枠とは別色・別位置） */}
-                <rect
-                  x={b.geometry.x - 4}
-                  y={b.geometry.y - 4}
-                  width={b.geometry.w + 8}
-                  height={b.geometry.h + 8}
-                  rx={7}
-                  fill="none"
-                  stroke="#0ea5e9"
-                  strokeWidth={3}
-                  pointerEvents="none"
-                  className="hidden group-focus-visible:inline"
                 />
                 {b.locked && (
                   <rect
@@ -230,6 +220,23 @@ export default function AllocationEditor({
               </g>
             );
           })}
+          {/* キーボードフォーカス: 外側の水色リング（全ブロックの上に描画） */}
+          {focusedBlockId !== null && (() => {
+            const b = byId.get(focusedBlockId);
+            return b ? (
+              <rect
+                x={b.geometry.x - 4}
+                y={b.geometry.y - 4}
+                width={b.geometry.w + 8}
+                height={b.geometry.h + 8}
+                rx={7}
+                fill="none"
+                stroke="#0ea5e9"
+                strokeWidth={3}
+                pointerEvents="none"
+              />
+            ) : null;
+          })()}
         </StadiumCanvas>
         <p className="mt-2 text-xs text-gray-500">
           斜線のブロックはチケットがあるため変更できません。白（ダーク時）/黒（ライト時）の破線枠は未保存の変更、橙の破線枠は競合、水色の外枠はキーボードフォーカスです。ロックされたブロックをタップすると枚数を表示します。
