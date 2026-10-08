@@ -43,8 +43,8 @@ export class PenustaAnalyticsStack extends Stack {
             'projection.enabled': 'true',
             'projection.dt.type': 'date',
             'projection.dt.format': 'yyyy-MM-dd',
-            // 候補日ごとに S3 LIST が走るので、データ（〜2026-11-21）を覆う最小の固定範囲にする
-            'projection.dt.range': '2025-12-01,2026-12-31',
+            // 候補日ごとに S3 LIST が走るので、データ（2021-01-01〜、scheduler の日次分を含め 2027 まで）を覆う最小の固定範囲にする
+            'projection.dt.range': '2021-01-01,2027-12-31',
             'projection.dt.interval': '1',
             'projection.dt.interval.unit': 'DAYS',
             'storage.location.template': `s3://${bucket.bucketName}/${prefix}/dt=\${dt}/`,
@@ -112,7 +112,7 @@ export class PenustaAnalyticsStack extends Stack {
       name: 'penusta-analytics',
       recursiveDeleteOption: true,
       workGroupConfiguration: {
-        bytesScannedCutoffPerQuery: 1_000_000_000,
+        bytesScannedCutoffPerQuery: 3_000_000_000,
         enforceWorkGroupConfiguration: true,
         publishCloudWatchMetricsEnabled: false,
         engineVersion: { selectedEngineVersion: 'Athena engine version 3' },
