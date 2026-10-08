@@ -12,8 +12,8 @@ use App\Models\Order;
 use App\Models\Seat;
 use App\Models\Ticket;
 use App\Models\TicketType;
-use Database\Seeders\AddUnsoldMatchesSeeder;
 use Database\Seeders\DatabaseSeeder;
+use Database\Seeders\MatchSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
 use Tests\TestCase;
@@ -22,49 +22,25 @@ class UnsoldMatchTest extends TestCase
 {
     use RefreshDatabase;
 
-    public function test_seeder_adds_unsold_matches_with_allocations_and_prices(): void
+    public function test_seeder_marks_matches_after_the_selling_ones_as_unsold(): void
     {
         $this->seed(DatabaseSeeder::class);
 
-        $unsold = FootballMatch::whereJsonContains('attributes->unsold', true)->orderBy('kickoff_at')->get();
-        $this->assertCount(2, $unsold);
-        $this->assertSame(['第37節', '第38節'], $unsold->pluck('section_label')->all());
-        $this->assertSame($unsold->last()->id, FootballMatch::orderByDesc('kickoff_at')->first()->id);
-        $this->assertSame('2026-11-28 05:00:00', $unsold[0]->kickoff_at->format('Y-m-d H:i:s'));
+        $onSale = FootballMatch::where('status', 'on_sale')->orderBy('kickoff_at')->get();
+        $selling = $onSale->take(MatchSeeder::SELLING_MATCH_COUNT);
+        $unsold = $onSale->skip(MatchSeeder::SELLING_MATCH_COUNT);
 
-        foreach ($unsold as $match) {
-            $this->assertSame('on_sale', $match->status);
-            $this->assertSame(Block::count(), MatchBlockAllocation::where('match_id', $match->id)->count());
-            $this->assertSame(12, MatchPrice::where('match_id', $match->id)->count());
+        $this->assertGreaterThan(0, $unsold->count());
+        foreach ($selling as $match) {
+            $this->assertArrayNotHasKey(MatchSeeder::UNSOLD_KEY, $match->attributes);
         }
-    }
+        foreach ($unsold as $match) {
+            $this->assertTrue($match->attributes[MatchSeeder::UNSOLD_KEY]);
+        }
+        $this->assertSame($unsold->count(), FootballMatch::whereJsonContains('attributes->unsold', true)->count());
+        $this->assertSame($unsold->last()->id, FootballMatch::orderByDesc('kickoff_at')->first()->id);
 
-    public function test_add_unsold_matches_seeder_is_idempotent(): void
-    {
-        $this->seed(DatabaseSeeder::class);
-        $counts = [FootballMatch::count(), MatchBlockAllocation::count(), MatchPrice::count()];
-
-        $this->seed(AddUnsoldMatchesSeeder::class);
-
-        $this->assertSame($counts, [FootballMatch::count(), MatchBlockAllocation::count(), MatchPrice::count()]);
-    }
-
-    public function test_add_unsold_matches_seeder_adds_missing_matches_to_existing_data(): void
-    {
-        $this->seed(DatabaseSeeder::class);
-        $ids = FootballMatch::whereJsonContains('attributes->unsold', true)->pluck('id');
-        MatchBlockAllocation::whereIn('match_id', $ids)->delete();
-        MatchPrice::whereIn('match_id', $ids)->delete();
-        FootballMatch::whereIn('id', $ids)->delete();
-        $matches = FootballMatch::count();
-
-        $this->seed(AddUnsoldMatchesSeeder::class);
-        $this->seed(AddUnsoldMatchesSeeder::class);
-
-        $this->assertSame($matches + 2, FootballMatch::count());
-        $new = FootballMatch::whereJsonContains('attributes->unsold', true)->get();
-        $this->assertCount(2, $new);
-        foreach ($new as $match) {
+        foreach ($unsold->take(3) as $match) {
             $this->assertSame(Block::count(), MatchBlockAllocation::where('match_id', $match->id)->count());
             $this->assertSame(12, MatchPrice::where('match_id', $match->id)->count());
         }
@@ -76,8 +52,8 @@ class UnsoldMatchTest extends TestCase
         $command = app(GenerateDemoData::class);
 
         foreach (FootballMatch::all() as $match) {
-            $expected = in_array($match->section_label, ['第37節', '第38節'], true);
-            $this->assertSame($expected, $command->isUnsold($match), $match->section_label);
+            $expected = ($match->attributes[MatchSeeder::UNSOLD_KEY] ?? false) === true;
+            $this->assertSame($expected, $command->isUnsold($match), $match->season->name.' '.$match->section_label);
         }
     }
 

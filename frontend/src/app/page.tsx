@@ -15,7 +15,8 @@ async function getHealth(): Promise<Health | null> {
 async function getMatches(): Promise<Match[]> {
   try {
     const res = await apiGet<{ data: Match[] }>("/api/matches");
-    return res.data;
+    // 終了済みの試合は一覧に出さない（API は全件返す）
+    return res.data.filter((m) => m.status !== "finished");
   } catch {
     return [];
   }

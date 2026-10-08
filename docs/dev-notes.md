@@ -56,7 +56,7 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 ```bash
 docker compose up -d --build
 docker compose exec app php artisan key:generate      # 初回のみ（.envはbackend/.env.exampleからコピー）
-docker compose exec app php artisan migrate:fresh --seed --force   # 管理者と未販売の 2 試合もここで入る
+docker compose exec app php artisan migrate:fresh --seed --force   # 管理者と 7 シーズン分の試合（AS_OF 以降の 4 試合目からは未販売）もここで入る
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data   # 未販売の試合は飛ばす
 # S3 バケット（初回のみ）。aws CLI コンテナは compose の環境変数で RustFS を向く
 docker compose --profile tools run --rm -T aws s3 mb s3://penusta-events
@@ -192,8 +192,9 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
   実質 user / session 単位。実 IP で制限するなら frontend から `X-Forwarded-For` を渡し、TrustProxies を設定する
 - `Order` / `Ticket` の `$fillable` に `status` / `total` / `expires_at` が入っている。今はリクエスト配列を `fill` していないが、
   今後の実装でもサーバー側で決めた値だけを渡すこと（code-reviewer / security-reviewer の確認項目）
-- 販売条件にキックオフ時刻を入れていない（過去の試合も買える）。合成データの試合が 1 つを除いて過去日付のため。
-  条件は `FirstComeSaleMethod::assertSellable` に足せばよい
+- 販売条件にキックオフ時刻を入れていない。`status` を `finished` に変える処理も無いので、`on_sale` の試合はキックオフ後も買える
+  （2026-10-09 の security-reviewer で再指摘。7 シーズン化で AS_OF 直後に販売中の試合が並ぶので表に出やすい）。割当編集はキックオフで止まるので基準が食い違う。
+  条件は `FirstComeSaleMethod::assertSellable` に足すか、キックオフで `finished` にする処理を置く。購入フローの変更なので Fable レビュー
 - 本番相当の設定（`APP_ENV=production`、`DEMO_AUTH_ENABLED=false`）で demo guard と `/api/demo/*` が閉じることはテストで確認済み。
   本物の認証は `auth:demo` を `auth:sanctum` に書き換えるのが入口
 - `now` はロック取得後に取る（`CheckoutService` / `CartService` とも）。サービスが使った `now` を戻り値（`CheckoutResult` / `CartChange` /
@@ -212,10 +213,9 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 ```bash
 docker compose exec app php artisan migrate                               # users.role、allocation の check 制約、監査テーブル
 docker compose exec app php artisan db:seed --class=AdminUserSeeder       # 管理者（admin@penusta.example、パスワードはランダム）
-docker compose exec app php artisan db:seed --class=AddUnsoldMatchesSeeder  # 未販売の 2 試合（allocation・価格も）
 ```
 
-どちらの seeder も冪等。2026-10-06 に適用済み（管理者 id 4002、未販売の試合 id 11 / 12）。`next.config.ts` を変えたので、
+AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08）以降の 4 試合目から。`next.config.ts` を変えたので、
 403 / 401 のページが出ないときは `docker compose restart frontend`。
 
 ### 決めたこと
@@ -271,8 +271,8 @@ docker compose exec app php artisan db:seed --class=AddUnsoldMatchesSeeder  # �
 
 ### 申し送り
 
-- E2E は未販売の試合に依存する。2026-11-28 / 12-05 のキックオフを過ぎると編集できる試合が無くなり、`pickEditableUnsoldMatch` が理由付きで落ちる。
-  `MatchSeeder::fixtures()` の未販売分の日付を先へずらして `AddUnsoldMatchesSeeder` を流し直す（kickoff で同一判定しているので、日付を変えると別の試合として増える）
+- E2E は未販売の試合に依存する。2026-27 最終節（2027-06）のキックオフを過ぎると編集できる試合が無くなり、`pickEditableUnsoldMatch` が理由付きで落ちる。
+  `AddUnsoldMatchesSeeder` は廃止した（MatchSeeder が DemoScenario から 7 シーズン分を作る）。`DemoScenario::AS_OF_JST` を進めて再シードする
 - 一般利用者の座席図の「購入不可」は色とカーソルだけで、文言が無い（E2E は `data-allocation` で見ている）
 - ルートの `app/not-found.tsx`（日本語）を足した。それまでは `/matches/admin` のような打ち間違いで Next 既定の英語の 404 が出て、
   管理画面の不具合と見分けにくかった（ブラウザ確認で実際に取り違えた）。確認手順の URL は `http://localhost:3100/admin` のように全部書く

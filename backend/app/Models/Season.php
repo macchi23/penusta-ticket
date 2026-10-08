@@ -13,12 +13,17 @@ class Season extends Model
     protected $fillable = [
         'name',
         'year',
+        'format',
+        'starts_on',
+        'ends_on',
     ];
 
     protected function casts(): array
     {
         return [
             'year' => 'integer',
+            'starts_on' => 'date',
+            'ends_on' => 'date',
         ];
     }
 

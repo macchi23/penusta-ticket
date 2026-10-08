@@ -170,7 +170,7 @@ export async function pickEditableUnsoldMatch(adminId: number): Promise<number> 
     if (blocks.every((b) => !b.locked)) return m.id;
   }
   throw new Error(
-    '未販売試合が無い。AddUnsoldMatchesSeeder の適用か、kickoff 日付（2026-12-05 以降は全試合キックオフ済みになる）を確認',
+    '未販売試合が無い。dev DB のシード（migrate:fresh --seed）か、kickoff 日付（2027-06 以降は全試合キックオフ済みになる）を確認',
   );
 }
 

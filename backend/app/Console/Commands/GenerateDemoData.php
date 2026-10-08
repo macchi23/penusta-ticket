@@ -7,6 +7,7 @@ use App\Models\FootballMatch;
 use App\Models\MatchPrice;
 use App\Models\Seat;
 use App\Models\TicketType;
+use App\Support\DemoData\DemoScenario;
 use Carbon\Carbon;
 use Database\Seeders\MatchSeeder;
 use Illuminate\Console\Command;
@@ -52,11 +53,12 @@ class GenerateDemoData extends Command
 
         $this->info('試合ごとの注文・チケット・行動ログを生成中...');
         $ticketTypeIds = TicketType::pluck('id', 'code');
-        $matches = FootballMatch::orderBy('kickoff_at')->get();
+        // 暫定: 注文の作り直しまでは 2026-27 シーズンの試合（finished と販売途中）だけを対象にする
+        $matches = FootballMatch::whereHas('season', fn ($q) => $q->where('name', '2026-27'))->orderBy('kickoff_at')->get();
         $blocks = Block::with('seatCategory', 'stand')->get()->keyBy('id');
         $seatsByBlock = Seat::select('id', 'block_id')->get()->groupBy('block_id');
-        $allocationsByMatch = DB::table('match_block_allocations')->get()->groupBy('match_id');
-        $priceMap = $this->buildPriceMap();
+        $allocationsByMatch = DB::table('match_block_allocations')->whereIn('match_id', $matches->modelKeys())->get()->groupBy('match_id');
+        $priceMap = $this->buildPriceMap($matches->modelKeys());
 
         foreach ($matches as $match) {
             $this->generateOrSkip($match, $blocks, $seatsByBlock, $allocationsByMatch, $priceMap, $ticketTypeIds);
@@ -217,12 +219,13 @@ class GenerateDemoData extends Command
     }
 
     /**
+     * @param  array<int, int>  $matchIds
      * @return array<int, array<int, array<int, int>>> [match_id][seat_category_id][ticket_type_id] => price
      */
-    private function buildPriceMap(): array
+    private function buildPriceMap(array $matchIds): array
     {
         $map = [];
-        foreach (MatchPrice::all() as $price) {
+        foreach (MatchPrice::whereIn('match_id', $matchIds)->get() as $price) {
             $map[$price->match_id][$price->seat_category_id][$price->ticket_type_id] = $price->price;
         }
 
@@ -457,7 +460,15 @@ class GenerateDemoData extends Command
             $daysBefore = mt_rand(15, 90);
         }
 
-        return $kickoff->copy()->subDays($daysBefore)->subMinutes(mt_rand(0, 1439));
+        $orderedAt = $kickoff->copy()->subDays($daysBefore)->subMinutes(mt_rand(0, 1439));
+
+        // 販売途中の試合（キックオフが AS_OF より後）の注文は AS_OF より前に限る
+        $asOf = Carbon::instance(DemoScenario::asOf())->utc();
+        if ($orderedAt->greaterThan($asOf)) {
+            $orderedAt = $asOf->copy()->subMinutes(mt_rand(0, 1439));
+        }
+
+        return $orderedAt;
     }
 
     /**

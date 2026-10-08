@@ -14,7 +14,8 @@ function formatKickoff(iso: string): string {
 }
 
 export default async function AdminPage() {
-  const matches = await getAdminMatches();
+  // 終了済みの試合は一覧に出さない（API は全件返す）
+  const matches = (await getAdminMatches()).filter((m) => m.status !== "finished");
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-10">
