@@ -62,6 +62,31 @@ final class SeasonCrowd
         return isset($this->passFrom[$userIndex]) && $this->passFrom[$userIndex] <= $at;
     }
 
+    /** その時点で有効な FC 会員か */
+    public function isFanclubAt(int $userIndex, int $at): bool
+    {
+        return isset($this->fanclubFrom[$userIndex]) && $this->fanclubFrom[$userIndex] <= $at;
+    }
+
+    /**
+     * このシーズンの年パス会員（ユーザー添字の昇順）
+     *
+     * @return list<int>
+     */
+    public function seasonPassHolders(): array
+    {
+        $holders = array_keys($this->passFrom);
+        sort($holders);
+
+        return $holders;
+    }
+
+    /** 年パスの valid_from（epoch） */
+    public function passFrom(int $userIndex): int
+    {
+        return $this->passFrom[$userIndex];
+    }
+
     /** FC の重みを付けて選ばれたが、その時点ではまだ会員でない */
     public function isOverweightedAt(int $userIndex, int $at): bool
     {

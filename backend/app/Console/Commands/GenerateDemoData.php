@@ -14,12 +14,17 @@ use App\Support\DemoData\DemoPopulationGenerator;
 use App\Support\DemoData\DemoScenario;
 use App\Support\DemoData\MatchContext;
 use App\Support\DemoData\MatchSalesGenerator;
+use App\Support\DemoData\MatchStanding;
 use App\Support\DemoData\MembershipPlan;
 use App\Support\DemoData\MembershipPlanner;
 use App\Support\DemoData\PgCopy;
 use App\Support\DemoData\SeasonCrowd;
+use App\Support\DemoData\SeasonFormat;
+use App\Support\DemoData\SeasonPassSeating;
 use App\Support\DemoData\SeasonSpan;
+use App\Support\DemoData\SeededRandom;
 use Database\Seeders\MatchSeeder;
+use Database\Seeders\PriceSeeder;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 
@@ -38,6 +43,8 @@ class GenerateDemoData extends Command
 
     /** 'password' の bcrypt（cost 10）。実行ごとに salt が変わると再現できないので固定する */
     private const PASSWORD_HASH = '$2y$10$p0EzVT2toiKXvziRGqVK8ekckTurz5VXkkYY3nCQZ9CMcM.8FSxnG';
+
+    private ?int $adultTypeId = null;
 
     public function handle(DemandModel $demand): int
     {
@@ -77,21 +84,45 @@ class GenerateDemoData extends Command
         $ticketTypeIds = TicketType::pluck('id', 'code')->all();
         $blocks = $this->loadBlocks();
         $seatIds = $this->loadSeatIds();
+        $alwaysHomeBlockIds = $this->alwaysHomeBlockIds();
+        $categoryBasePrices = $this->categoryBasePrices();
 
         foreach (array_slice($spans, -$seasonCount) as $span) {
             $crowd = new SeasonCrowd($population, $plan, $span, $idOffset);
-            $generator = new MatchSalesGenerator($demand, $crowd, $sink, $ticketTypeIds, $seed, $browse, $scale);
+            $seating = new SeasonPassSeating(
+                $crowd->seasonPassHolders(),
+                $blocks,
+                $seatIds,
+                $alwaysHomeBlockIds,
+                new SeededRandom($seed, 'passseat:'.$span->definition->name),
+            );
+            $generator = new MatchSalesGenerator($demand, $crowd, $seating, $sink, $ticketTypeIds, $seed, $browse, $scale);
+            $standings = $this->loadStandings($span);
+            $seasonMatches = FootballMatch::where('season_id', $span->seasonId)->orderBy('kickoff_at')->orderBy('id')->get();
+            $firstId = $seasonMatches->first()?->id;
+            $lastId = $seasonMatches->last()?->id;
             $matches = 0;
 
-            foreach (FootballMatch::where('season_id', $span->seasonId)->orderBy('kickoff_at')->orderBy('id')->get() as $match) {
+            foreach ($seasonMatches as $match) {
                 if ($this->isUnsold($match)) {
                     continue;
                 }
+                $prices = $this->loadPrices($match->id);
+                $attributes = $match->attributes ?? [];
                 $generator->generate(
-                    new MatchContext($match->id, $match->kickoff_at->getTimestamp(), $match->attributes ?? [], $span),
+                    new MatchContext(
+                        $match->id,
+                        $match->kickoff_at->getTimestamp(),
+                        $attributes,
+                        $span,
+                        $this->standingBefore($standings, (int) ($attributes['round'] ?? 0)),
+                        $this->priceRatios($prices, $categoryBasePrices),
+                        $match->id === $firstId,
+                        $match->id === $lastId,
+                    ),
                     $this->allocatedBlocks($match->id, $blocks),
                     $seatIds,
-                    $this->loadPrices($match->id),
+                    $prices,
                 );
                 $matches++;
             }
@@ -144,7 +175,7 @@ class GenerateDemoData extends Command
     }
 
     /** @return list<SeasonSpan> 古い順 */
-    private function loadSpans(): array
+    public function loadSpans(): array
     {
         $seasons = Season::all()->keyBy('name');
         $spans = [];
@@ -252,6 +283,99 @@ class GenerateDemoData extends Command
         }
 
         return $rows;
+    }
+
+    /**
+     * 全試合で home の割当のブロック（年パスの固定席を置ける）
+     *
+     * @return list<int>
+     */
+    private function alwaysHomeBlockIds(): array
+    {
+        return DB::table('match_block_allocations')->groupBy('block_id')
+            ->havingRaw("count(*) filter (where allocation <> 'home') = 0")
+            ->orderBy('block_id')->pluck('block_id')->map(fn ($id) => (int) $id)->all();
+    }
+
+    /** @return array<int, float> seat_category_id => 2025 の基準の大人価格 */
+    private function categoryBasePrices(): array
+    {
+        $prices = [];
+        foreach (DB::table('seat_categories')->get(['id', 'name']) as $category) {
+            if (isset(PriceSeeder::BASE_PRICES[$category->name])) {
+                $prices[$category->id] = (float) PriceSeeder::BASE_PRICES[$category->name][0];
+            }
+        }
+
+        return $prices;
+    }
+
+    /**
+     * @param  array<int, array<int, int>>  $prices  seat_category_id => ticket_type_id => 価格
+     * @param  array<int, float>  $basePrices
+     * @return array<int, float>
+     */
+    private function priceRatios(array $prices, array $basePrices): array
+    {
+        $adultId = $this->adultTypeId ??= (int) TicketType::where('code', 'adult')->value('id');
+        $ratios = [];
+        foreach ($prices as $categoryId => $byType) {
+            if (isset($byType[$adultId], $basePrices[$categoryId])) {
+                $ratios[$categoryId] = $byType[$adultId] / $basePrices[$categoryId];
+            }
+        }
+
+        return $ratios;
+    }
+
+    /**
+     * ペヌスタの節ごとの順位表（節 => 抜粋）。結果のある節だけ
+     *
+     * @return array<int, MatchStanding>
+     */
+    public function loadStandings(SeasonSpan $span): array
+    {
+        $rows = DB::table('league_standings')->where('season_id', $span->seasonId)->orderBy('round')->orderBy('position')->get();
+        $isHalf = $span->definition->format === SeasonFormat::Half;
+        $cutoffRank = $span->definition->teamCount - DemoScenario::RELEGATION_SLOTS + 1;
+
+        $byRound = [];
+        foreach ($rows as $row) {
+            $byRound[$row->round][$row->position] = $row;
+        }
+
+        $standings = [];
+        foreach ($byRound as $round => $table) {
+            foreach ($table as $row) {
+                if ($row->team_id === DemoScenario::HOME_CLUB_ID) {
+                    $standings[$round] = new MatchStanding(
+                        $row->position,
+                        $row->points,
+                        $row->form,
+                        $table[1]->points,
+                        $isHalf ? null : ($table[$cutoffRank]->points ?? null),
+                    );
+                }
+            }
+        }
+
+        return $standings;
+    }
+
+    /**
+     * 第 $round 節の試合の前の順位表。直前の節の分が無ければ（先の節）結果のある最後の節の分を使う。第 1 節は null
+     *
+     * @param  array<int, MatchStanding>  $standings
+     */
+    public function standingBefore(array $standings, int $round): ?MatchStanding
+    {
+        for ($r = $round - 1; $r >= 1; $r--) {
+            if (isset($standings[$r])) {
+                return $standings[$r];
+            }
+        }
+
+        return null;
     }
 
     /** @return array<int, array<int, int>> seat_category_id => ticket_type_id => 価格 */

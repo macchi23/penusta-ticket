@@ -8,25 +8,29 @@ namespace App\Support\DemoData;
  */
 interface DemandModel
 {
+    /** 試合ごとの需要のぶれ（乗数）。1 試合に 1 回だけ引き、全ブロックで共有する */
+    public function matchNoise(SeededRandom $rng): float;
+
     /**
-     * ブロックの販売目標枚数。capacity を超えてよいが、呼び出し側が capacity と座席数で切る
+     * ブロックの制約なしの需要。capacity では切らない（完売の打ち切りは呼び出し側）
      *
      * @param  string  $allocation  home / away
      */
-    public function targetSold(MatchContext $match, BlockInfo $block, string $allocation, SeededRandom $rng): int;
+    public function blockDemand(MatchContext $match, BlockInfo $block, string $allocation, float $noise): BlockDemand;
+
+    /** 試合全体の需要指数（価格は基準のまま）。席種に紐づかない行動ログの時期に使う */
+    public function matchIndex(MatchContext $match, float $noise): float;
 
     /** 1 注文あたりの枚数 */
     public function orderSize(MatchContext $match, BlockInfo $block, SeededRandom $rng): int;
 
     /**
-     * 1 注文ぶんの券種 code（adult / youth / season_pass）。長さは $quantity。
-     * season_pass は年パス会員（$isSeasonPassHolder）だけが指定でき、1 ユーザー 1 試合 1 枚までは呼び出し側が保証する
-     * （超えた分は adult にされる）
+     * 1 注文ぶんの一般販売の券種 code（adult / youth）。長さは $quantity。年パスの引換は一般販売では作らない
      *
      * @return list<string>
      */
-    public function ticketTypesForOrder(MatchContext $match, BlockInfo $block, bool $isSeasonPassHolder, int $quantity, SeededRandom $rng): array;
+    public function ticketTypesForOrder(MatchContext $match, BlockInfo $block, int $quantity, SeededRandom $rng): array;
 
-    /** キックオフの何分前に買うか */
-    public function leadMinutes(MatchContext $match, SeededRandom $rng): int;
+    /** キックオフの何分前に買うか（販売開始での打ち切りは呼び出し側）。$index は需要指数 */
+    public function leadMinutes(float $index, SeededRandom $rng): int;
 }

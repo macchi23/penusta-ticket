@@ -2,10 +2,14 @@
 
 namespace Tests\Feature;
 
+use App\Console\Commands\GenerateDemoData;
+use App\Support\DemoData\DemandModel;
 use App\Support\DemoData\DemoScenario;
+use App\Support\DemoData\SeasonPassSeating;
 use Database\Seeders\DatabaseSeeder;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\DB;
+use Tests\Concerns\HighDemandModel;
 use Tests\TestCase;
 
 class GenerateDemoDataTest extends TestCase
@@ -101,6 +105,137 @@ class GenerateDemoDataTest extends TestCase
         // tickets.created_at は timestamp（タイムゾーン無し）なので UTC の値で比べる（AS_OF = 2026-10-08 00:00 JST）
         $this->assertSame(0, DB::table('tickets')->whereIn('match_id', $unsold)->count());
         $this->assertSame(0, DB::table('events')->whereIn(DB::raw("(payload->>'match_id')::int"), $unsold)->count());
+    }
+
+    public function test_season_pass_seats_are_fixed_and_never_sold_to_the_general_public(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(3, 0.05);
+        $passTypeId = DB::table('ticket_types')->where('code', 'season_pass')->value('id');
+
+        $this->assertGreaterThan(0, DB::selectOne('select count(*) c from order_items where ticket_type_id = ?', [$passTypeId])->c);
+        // 引換は 1 ユーザー 1 席、一般販売の券は引換の席に座らない（同じシーズン内）
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join tickets t on t.id = i.ticket_id join orders o on o.id = i.order_id join matches m on m.id = t.match_id where i.ticket_type_id = ? and t.seat_id is not null group by m.season_id, t.seat_id having count(distinct o.user_id) > 1) x', [$passTypeId])->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from order_items gi join tickets gt on gt.id = gi.ticket_id join matches gm on gm.id = gt.match_id where gi.ticket_type_id <> ? and gt.seat_id is not null and exists (select 1 from order_items pi join tickets pt on pt.id = pi.ticket_id join matches pm on pm.id = pt.match_id where pi.ticket_type_id = ? and pt.seat_id = gt.seat_id and pm.season_id = gm.season_id)', [$passTypeId, $passTypeId])->c);
+        // 引換はアウェー割当のブロックには無い。1 ユーザー 1 シーズンで同じブロック・席に固定される
+        $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join tickets t on t.id = i.ticket_id join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id where i.ticket_type_id = ? and a.allocation <> 'home'", [$passTypeId])->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join tickets t on t.id = i.ticket_id join orders o on o.id = i.order_id join matches m on m.id = t.match_id where i.ticket_type_id = ? group by m.season_id, o.user_id having count(distinct t.block_id) > 1 or count(distinct t.seat_id) > 1) x', [$passTypeId])->c);
+        // 年パスの券種は一般販売の注文に混ざらない（引換の注文は 1 枚だけ）
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select i.order_id from order_items i group by i.order_id having bool_or(i.ticket_type_id = ?) and count(*) > 1) x', [$passTypeId])->c);
+    }
+
+    public function test_presale_orders_are_fanclub_members_only(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(3, 0.05);
+
+        $presale = "o.ordered_at < m.kickoff_at - interval '35 days'";
+        $this->assertGreaterThan(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where $presale")->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where $presale and not exists (select 1 from memberships f where f.user_id = o.user_id and f.kind = 'fanclub' and f.valid_from <= (o.ordered_at at time zone 'Asia/Tokyo')::date and f.valid_until >= (o.ordered_at at time zone 'Asia/Tokyo')::date)")->c);
+        // 先行の前（キックオフの 42 日より前）には誰も買えない
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.ordered_at < m.kickoff_at - interval '42 days'")->c);
+    }
+
+    public function test_bad_weather_cuts_orders_in_the_last_three_days(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(7, 0.05);
+        $passTypeId = DB::table('ticket_types')->where('code', 'season_pass')->value('id');
+
+        $share = DB::select("select (m.attributes->>'weather') in ('雨','雪') as bad, avg((o.ordered_at >= m.kickoff_at - interval '3 days')::int) as late
+            from orders o join matches m on m.id = o.match_id
+            where exists (select 1 from order_items i where i.order_id = o.id and i.ticket_type_id <> ?)
+            group by 1", [$passTypeId]);
+        $byWeather = collect($share)->mapWithKeys(fn ($r) => [$r->bad ? 'bad' : 'fair' => (float) $r->late]);
+
+        $this->assertCount(2, $byWeather);
+        $this->assertLessThan($byWeather['fair'] * 0.9, $byWeather['bad']);
+    }
+
+    public function test_sold_out_blocks_stop_at_remaining_seats_and_overflow_becomes_abandoned_sessions(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        // scale 0.05 を掛けて販売可能席数の 1.2 倍の需要にする
+        $this->app->bind(DemandModel::class, fn () => new HighDemandModel(24.0));
+        $this->generate(1, 0.05);
+        $passTypeId = DB::table('ticket_types')->where('code', 'season_pass')->value('id');
+        $holders = DB::table('memberships')->where('kind', 'season_pass')->where('valid_until', '2027-06-30')->count();
+        [$goalFixed, $backFixed, $mainFixed] = SeasonPassSeating::split($holders);
+
+        // 売り越し 0・席の重複 0
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets t join blocks b on b.id = t.block_id group by t.match_id, b.id, b.capacity having count(*) > b.capacity) x')->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets where seat_id is not null group by match_id, seat_id having count(*) > 1) x')->c);
+
+        // 一般販売の枚数 + そのシーズンに引換のあったユーザー数（固定席の下限）は capacity 以下。固定枠まで一般販売していれば超える
+        $over = DB::selectOne('select count(*) c from (
+            select t.match_id, t.block_id, b.capacity,
+              count(*) filter (where i.ticket_type_id <> ?) as general
+            from tickets t join order_items i on i.ticket_id = t.id join blocks b on b.id = t.block_id
+            group by t.match_id, t.block_id, b.capacity) g
+          join (
+            select t.block_id, count(distinct o.user_id) as fixed
+            from tickets t join order_items i on i.ticket_id = t.id join orders o on o.id = i.order_id
+            where i.ticket_type_id = ? group by t.block_id) f on f.block_id = g.block_id
+          where g.general + f.fixed > g.capacity', [$passTypeId, $passTypeId])->c;
+        $this->assertSame(0, $over);
+
+        // 完売している: home のブロックの一般販売が、capacity − 固定席の上限（席種ごとの固定席数）以上に達している
+        $maxFixed = max($goalFixed, $backFixed, $mainFixed);
+        $soldOut = DB::selectOne("select count(*) c from (
+            select t.match_id, t.block_id, b.capacity, count(*) as general
+            from tickets t join order_items i on i.ticket_id = t.id join blocks b on b.id = t.block_id
+            join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id
+            where i.ticket_type_id <> ? and a.allocation = 'home' group by t.match_id, t.block_id, b.capacity) g
+          where g.general >= g.capacity - ?", [$passTypeId, $maxFixed])->c;
+        $this->assertGreaterThan(0, $soldOut);
+
+        // 完売ブロックの座席表で離脱したセッション: block_code 付きの view_seatmap があり、購入が無い
+        $abandoned = DB::selectOne("select count(*) c from (
+            select session_id from events group by session_id
+            having bool_or(event_type = 'view_seatmap' and payload->>'block_code' is not null) and not bool_or(event_type = 'purchase')) x")->c;
+        $this->assertGreaterThan(0, $abandoned);
+    }
+
+    public function test_standing_before_a_match_is_the_previous_rounds_row(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $command = $this->app->make(GenerateDemoData::class);
+        $checked = 0;
+
+        foreach ($command->loadSpans() as $span) {
+            $standings = $command->loadStandings($span);
+            $matches = DB::table('matches')->where('season_id', $span->seasonId)->get();
+            foreach ($matches as $match) {
+                $round = (int) json_decode($match->attributes, true)['round'];
+                $standing = $command->standingBefore($standings, $round);
+                if ($round === 1) {
+                    $this->assertNull($standing);
+
+                    continue;
+                }
+                $row = DB::table('league_standings')->where('season_id', $span->seasonId)->where('round', $round - 1)->where('team_id', DemoScenario::HOME_CLUB_ID)->first();
+                if ($row === null) {
+                    continue;
+                }
+                $leader = DB::table('league_standings')->where('season_id', $span->seasonId)->where('round', $round - 1)->where('position', 1)->value('points');
+                $this->assertNotNull($standing);
+                $this->assertSame([$row->position, $row->points, $row->form, $leader], [$standing->rank, $standing->points, $standing->form, $standing->leaderPoints]);
+                $checked++;
+            }
+        }
+
+        $this->assertGreaterThan(50, $checked);
+    }
+
+    public function test_season_pass_seats_are_only_in_blocks_that_are_home_in_every_match(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(2, 0.05);
+        $passTypeId = DB::table('ticket_types')->where('code', 'season_pass')->value('id');
+
+        $this->assertGreaterThan(0, DB::selectOne('select count(*) c from order_items where ticket_type_id = ?', [$passTypeId])->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join tickets t on t.id = i.ticket_id
+            where i.ticket_type_id = ? and exists (select 1 from match_block_allocations a where a.block_id = t.block_id and a.allocation <> 'home')", [$passTypeId])->c);
     }
 
     public function test_keeps_test_user_and_admin_with_stable_ids(): void
