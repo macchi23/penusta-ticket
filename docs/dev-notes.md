@@ -1,6 +1,6 @@
 # 開発メモ（引き継ぎ）
 
-最終更新: 2026-10-06（管理画面: 割当・緩衝帯エディタを追加）
+最終更新: 2026-10-11（スタジアム 2 万人化、7 シーズン分の成績シナリオ付き合成データ）
 
 ## 現状
 
@@ -14,8 +14,9 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 - 認証は無い。開発用の「ユーザー切替」（画面上部のバー）で合成ユーザーになりきる。
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
-- 投入済みデータ: 12試合（うち 2026-11-28 / 12-05 の 2 試合はチケット 0 の未販売）/ 指定席3,200席+自由席8ブロック / ユーザー2,000 + 管理者 1 /
-  注文2.2万 / チケット4.8万 / イベント20万
+- 投入済みデータ（2026-10-11、`--seasons=7`）: 7 シーズン 123 試合（2026-27 は finished 5 / 販売途中 3 / 未販売 11）/
+  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 9 万 + 管理者 1 / 注文 81 万 / チケット 145 万 / イベント 603 万。
+  合成データの仕様・規模・特徴量の約束は [demo-data.md](demo-data.md)
 - 管理画面 http://localhost:3100/admin （ユーザー切替で先頭の「管理者」を選ぶ）で試合ごとの割当を塗り替えられる（下の「割当エディタ」）
 - events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
 
@@ -72,8 +73,9 @@ scripts/analytics.sh build
 - 座席図のAPI契約は `frontend/src/lib/api.ts` の型が正（バックエンドはこれに合わせる）
 - 割当テンプレートは試合作成時に `match_block_allocations` へコピー展開（AllocationSeeder参照）。
   試合ごとの変更は `Services/Admin/AllocationChangeService` 経由で行う（直接 UPDATE すると購入側との直列化と監査が抜ける）
-- 合成データの分布ルールは `app/Console/Commands/GenerateDemoData.php`。mt_srand(42)で再現可能（mt_rand 由来の値のみ。uuid・ID・created_at は
-  実行ごとに変わる）。生成器を直すときは mt_rand の呼び出し回数・順序・幅（max − min）を変えなければ後続の生成は同じ値になる
+- 合成データは `app/Support/DemoData/` と `app/Console/Commands/GenerateDemoData.php`（[demo-data.md](demo-data.md)）。用途キーごとの
+  `SeededRandom` で、同じ引数なら UUID・ID・created_at まで全テーブルが一致する。COPY は `PgCopy`（`copyFromArray` の `$nullAs` は `\\N` の 3 文字を渡す。
+  `\N` の 2 文字だと行の `\N` が文字列 "N" になる）
 
 ## 検証用クエリ（分析遊びの入口）
 
@@ -87,8 +89,8 @@ JOIN orders o ON o.id=(SELECT oi.order_id FROM order_items oi WHERE oi.ticket_id
 JOIN users u ON u.id=o.user_id GROUP BY st.name;
 ```
 
-期待値: ゴール裏（北）= 平均39歳・男性71%、メイン = 平均51歳。
-ビッグマッチ（opponent_popularity=5 の2試合）は大規模アウェー配置（S1,S2=away, S3=buffer）。
+期待値（2026-10-11、`--seasons=7`。上のクエリの基準日を `m.kickoff_at::date` にした版）: 北 = 平均 37 歳・男性 66%、南 = 36 歳・68%、バック = 41 歳・55%、メイン = 47 歳・55%。
+ビッグマッチ（opponent_popularity=5）は大規模アウェー配置（S1〜S8=away, S9=buffer）、通常は S1〜S4=away, S5=buffer。
 
 ここは tickets / orders / users を Postgres で直接見る整合確認用。events 由来の分析（ファネル等）は `analytics/`（DuckDB）に置く。
 
@@ -115,8 +117,9 @@ scripts/analytics.sh shell     # DuckDB の対話モード
   シークレットは `analytics/setup.sql` で毎回一時作成（PERSISTENT は平文でディスクに残るので使わない）。TimeZone は UTC に固定
 - 非対話の `docker compose run` は `-T` が要る（無いと `-c` が compose のフラグとして解釈される）。イメージは distroless でシェルが無い
 - `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
-- ファネル（2026-10-04 再生成後）: (session_id, match_id) 単位で view_match 89,764 → view_seatmap 56,160 → add_to_cart 35,970 →
-  purchase 22,441。合成データの購入セッションは時刻順に並ぶので、順序つき到達も 22,441（順序不問と一致）
+- ファネル（2026-10-11、`--seasons=7`）: (session_id, match_id) 単位で view_match 2,443,792 → view_seatmap 1,637,323 → add_to_cart 1,139,926 →
+  purchase 809,653（orders と一致）。順序つき到達も 809,653。build は約 15 秒
+- export の全期間は `--from=2021-01-01 --to=2026-12-31`（約 2.5 分）。0 件の日は既存キーを消すので、旧データの残骸もこれで消える
 - 前日分は scheduler が毎日 00:30 UTC（JST 09:30）に自動で出す（下の「scheduler」）
 
 ## scheduler（2026-10-04）
@@ -333,7 +336,7 @@ scripts/aws-analytics.sh funnel [table]                      # 試合別ファ�
 scripts/aws-analytics.sh query <sql-file>                    # SELECT / WITH のみ（例: analytics/athena/funnel_by_match.sql）
 ```
 
-- 期待値（2026-10-05）: sync は raw 351 / curated 351 オブジェクト。`compare` はどちらも ok（ファネル合計 89,764 / 56,160 / 35,970 / 22,441 / 22,441）。
+- 期待値（2026-10-05・旧データ 20 万行。7 シーズン化の後は未計測）: sync は raw 351 / curated 351 オブジェクト。`compare` はどちらも ok（ファネル合計 89,764 / 56,160 / 35,970 / 22,441 / 22,441）。
   events_curated は 19.5MB スキャン・3.1 秒、events_raw は 19.7MB・5.4 秒
 
 ### Iceberg（curated の Iceberg 化）
@@ -355,7 +358,7 @@ scripts/aws-analytics.sh ddl   $I/08_vacuum.sql         # VACUUM
 scripts/aws-analytics.sh compare events_iceberg
 ```
 
-- 結果（2026-10-05）: CTAS 6.8MB スキャン・4.3 秒 → MERGE（2026-01-10 の 233 行、0.6MB）で overwrite スナップショット、件数は 204,353 のまま →
+- 結果（2026-10-05・旧データ）: CTAS 6.8MB スキャン・4.3 秒 → MERGE（2026-01-10 の 233 行、0.6MB）で overwrite スナップショット、件数は 204,353 のまま →
   time travel（`FOR VERSION AS OF` 最初の snapshot_id）は before / current とも 204,353、スキャン 0 バイト（メタデータで count）→
   OPTIMIZE で replace スナップショット（0.18MB）→ VACUUM でスナップショット 3 → 1、`iceberg/events/` は 22 オブジェクト 4.1MB、compare は ok
 - 実行時の注意: `ddl` の実行が `query` と違い自動許可されない（Claude Code から流すときは都度承認）
@@ -377,7 +380,7 @@ us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象
 
 ### 費用の目安
 
-- Athena は $5/TB・MB 切り上げ・1 クエリ最低 10MB。DDL と失敗クエリは無課金。WorkGroup でスキャン 1GB/クエリの上限を enforce している
+- Athena は $5/TB・MB 切り上げ・1 クエリ最低 10MB。DDL と失敗クエリは無課金。WorkGroup でスキャン 3GB/クエリの上限を enforce している（7 シーズン化で 1GB から上げた。deploy は未実施）
 - 今回の全クエリで $0.001 未満の見込み。Glue Data Catalog は 100 万オブジェクト・月 100 万リクエストまで無料。S3 は 2025-07-15 より前に作ったアカウントなら旧無料枠（12 か月）、以降はクレジット制の新プラン
 
 ### 注意
@@ -385,7 +388,7 @@ us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象
 - `sync` は必ず `scripts/analytics.sh build` の直後に。build 前だと古い curated が S3 に載る
 - `sync` の `--delete` は `raw/events/` と `curated/events/` に限る。`iceberg/events/` には及ばない
 - Iceberg テーブルは CFn の外（Athena の DDL）で作るので、Athena の DROP TABLE でデータも消える。teardown で DROP してからスタックを消す
-- partition projection の範囲は 2025-12-01〜2026-12-31 に固定。合成データの範囲外の日付を足すときは `infra/` のテーブル定義を直す
+- partition projection の範囲は 2021-01-01〜2027-12-31 に固定（コードは 2026-10-08 に変更、deploy は未実施）。合成データの範囲外の日付を足すときは `infra/` のテーブル定義を直す
   （`NOW+2YEARS` のような広い範囲は候補日ごとに S3 LIST が走る。funnel 1 回で約 4,000 LIST になり、無料枠 2,000/月を超える）
 - export 先（`events:export`）を実 S3 に切り替えていない。app と scheduler が `.env` を共有して毎日実 AWS に書くことになり、SSO 期限切れで失敗し、
   Laravel の s3 ディスクに token キーが無く `AWS_SESSION_TOKEN` が落ちるため

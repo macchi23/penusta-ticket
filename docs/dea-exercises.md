@@ -1,7 +1,7 @@
 # DEA 演習メニュー（ペヌスタのデータで手を動かす）
 
 dea-notes.md が「下した判断の記録」なのに対し、こちらは「これから試す演習の候補」。
-DEA-C01 の 4 ドメインごとに、このリポジトリのデータ（イベントログ約 20 万行、351 日分）と基盤（`infra/`、`scripts/aws-analytics.sh`）で何をやれば論点を体感できるかを並べる。
+DEA-C01 の 4 ドメインごとに、このリポジトリのデータ（2026-10-11 に 7 シーズン化。イベントログ約 603 万行、2021-01〜2026-10 の約 2,100 日分、RustFS 上で raw 171MB / curated 223MB。[demo-data.md](demo-data.md)）と基盤（`infra/`、`scripts/aws-analytics.sh`）で何をやれば論点を体感できるかを並べる。
 終えた演習は dea-notes.md に論点として書き移し、ここでは「済」にする。
 
 ## 前提と費用の守り
@@ -29,7 +29,7 @@ DEA-C01 の 4 ドメインごとに、このリポジトリのデータ（イベ
 | 2-1 | funnel を `WHERE dt BETWEEN ...` ありとなしで流し、DataScannedInBytes を比べる | Athena | パーティションプルーニング（dea-notes 1.） |
 | 2-2 | 「JST の日別購入数」を `jst_date` で絞る場合と `dt`（UTC）で絞る場合で比べる。`jst_date` はパーティションではないので全スキャンになる | Athena | パーティションキーとタイムゾーンの選び方（dea-notes 2.） |
 | 2-3 | 同じデータを CTAS で JSON / Parquet（SNAPPY）/ Parquet（ZSTD）に書き分け、同じ集計のスキャン量と S3 サイズを比べる | Athena | 列指向と圧縮（dea-notes 3. / 4.） |
-| 2-4 | 日次 1 ファイル（raw と curated で 702 ファイル・計約 12MB、1 ファイル平均 20KB 弱）の小ささを確認し、月単位の CTAS や Iceberg の `OPTIMIZE` で結合して速度を比べる | Athena | small files 問題（dea-notes 5.） |
+| 2-4 | 日次 1 ファイル（旧データでは 702 ファイル・計約 12MB・平均 20KB 弱。7 シーズン化後は日数が約 6 倍・1 日あたりも増えたので測り直す）の小ささを確認し、月単位の CTAS や Iceberg の `OPTIMIZE` で結合して速度を比べる | Athena | small files 問題（dea-notes 5.） |
 | 2-5 | partition projection をやめて `ALTER TABLE ADD PARTITION` / `MSCK REPAIR TABLE` で登録し、手間と Glue のオブジェクト数を比べる | Athena | パーティション登録の 3 方式、Data Catalog の無料枠 |
 | 2-6 | Iceberg で誤った `DELETE`（例: purchase を消す）→ funnel が崩れる → `FOR VERSION AS OF` の結果を `INSERT` して戻す | Athena | タイムトラベルによる復旧（dea-notes 9.） |
 | 2-7 | raw に S3 ライフサイクル（一定日数後に Glacier Instant Retrieval など）を設計だけする。最低保存期間の課金があるので実際には適用しない | ローカル（設計のみ） | ストレージクラスと最低保存期間 |

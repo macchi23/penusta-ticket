@@ -133,7 +133,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 ## 5. ファイルサイズ（small files 問題）
 
 **ペヌスタでの使い方**
-- 1 dt = 1 ファイル。1 日分が gzip で約 400KB なので分割しない
+- 1 dt = 1 ファイル。1 日分が gzip で約 400KB（旧データでの最大。7 シーズン化後も 1 日の最大は数 MB 程度の見込みで、未計測）なので分割しない
 - DuckDB の Parquet 出力も 1 dt 1 ファイルになることを確認した
 
 **AWS での対応**
@@ -416,7 +416,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - `events_iceberg` は Athena の CTAS で作る（CFn の外）
 - Athena WorkGroup `penusta-analytics`: engine v3、クエリ結果は Athena 管理（結果バケット不要、24 時間で消える）、スキャン上限 1GB / クエリ + enforce
 - S3 は BPA、SSE-S3、SSL 強制、versioning なし、中断マルチパートは 1 日で破棄。タグ `project=penusta-analytics` を App に 1 か所
-- 実績: funnel を DuckDB と照合して一致（events_curated 19.5MB スキャン・3.1 秒 / events_raw 19.7MB・5.4 秒 / events_iceberg 12.6MB）。1 クエリの課金最小は 10MB で、全体で $0.001 未満の見込み
+- 実績（2026-10-05・旧データ 20 万行。7 シーズン化後は未計測）: funnel を DuckDB と照合して一致（events_curated 19.5MB スキャン・3.1 秒 / events_raw 19.7MB・5.4 秒 / events_iceberg 12.6MB）。1 クエリの課金最小は 10MB で、全体で $0.001 未満の見込み
 
 **AWS での対応**
 - パーティションの登録: partition projection / クローラ / `MSCK REPAIR TABLE` / `ALTER TABLE ADD PARTITION`（1. 参照）
