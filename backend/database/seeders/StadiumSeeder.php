@@ -12,11 +12,12 @@ use Illuminate\Database\Seeder;
 class StadiumSeeder extends Seeder
 {
     /**
-     * SVG viewbox is 1000x700. The pitch occupies x:250-750, y:210-490.
+     * SVG viewbox is 1000x760. The pitch (105:68) occupies x:250-750, y:218-542.
+     * Main y:90-190, back y:570-670, goal ends sit between them (y:195-565).
      */
     private const SIDE_W = 44;
 
-    private const GOAL_H = 32;
+    private const GOAL_H = 21;
 
     public function run(): void
     {
@@ -44,7 +45,7 @@ class StadiumSeeder extends Seeder
                 seatCategory: in_array($code, $mainCentralCodes, true) ? $category1 : $category2,
                 code: $code,
                 x: $x,
-                y: 80,
+                y: 90,
             );
         }
 
@@ -55,12 +56,12 @@ class StadiumSeeder extends Seeder
                 seatCategory: $category3,
                 code: 'B'.($i + 1),
                 x: $x,
-                y: 520,
+                y: 570,
             );
         }
 
         // 北スタンド（ホームゴール裏）: N1-N16 自由席（ゴール裏カテゴリー）
-        foreach ($this->distributeVertical(80, 620, 16, self::GOAL_H) as $i => $y) {
+        foreach ($this->distributeVertical(195, 565, 16, self::GOAL_H) as $i => $y) {
             $this->createUnreservedBlock(
                 stand: $northStand,
                 seatCategory: $goalBack,
@@ -71,7 +72,7 @@ class StadiumSeeder extends Seeder
         }
 
         // 南スタンド: S1-S16 自由席（ゴール裏カテゴリー、アウェー側になりうる）
-        foreach ($this->distributeVertical(80, 620, 16, self::GOAL_H) as $i => $y) {
+        foreach ($this->distributeVertical(195, 565, 16, self::GOAL_H) as $i => $y) {
             $this->createUnreservedBlock(
                 stand: $southStand,
                 seatCategory: $goalBack,

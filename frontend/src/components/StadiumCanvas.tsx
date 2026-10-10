@@ -8,6 +8,9 @@ export default function StadiumCanvas({
   viewbox: { width: number; height: number };
   children: ReactNode;
 }) {
+  // ピッチは実寸比 105:68。幅は viewBox の半分、縦は中央
+  const pitchW = viewbox.width * 0.5;
+  const pitchH = pitchW / (105 / 68);
   return (
     <svg
       viewBox={`0 0 ${viewbox.width} ${viewbox.height}`}
@@ -16,9 +19,9 @@ export default function StadiumCanvas({
       {/* ピッチ */}
       <rect
         x={viewbox.width * 0.25}
-        y={viewbox.height * 0.3}
-        width={viewbox.width * 0.5}
-        height={viewbox.height * 0.4}
+        y={(viewbox.height - pitchH) / 2}
+        width={pitchW}
+        height={pitchH}
         rx={8}
         fill="#16a34a"
       />

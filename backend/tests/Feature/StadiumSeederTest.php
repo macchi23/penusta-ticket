@@ -92,16 +92,33 @@ class StadiumSeederTest extends TestCase
             $this->assertGreaterThanOrEqual(0, $x, $code);
             $this->assertGreaterThanOrEqual(0, $y, $code);
             $this->assertLessThanOrEqual(1000, $x + $w, $code);
-            $this->assertLessThanOrEqual(700, $y + $h, $code);
+            $this->assertLessThanOrEqual(760, $y + $h, $code);
         }
 
-        $rects[] = ['pitch', 250.0, 210.0, 500.0, 280.0];
+        $rects[] = ['pitch', 250.0, 218.0, 500.0, 324.0];
         for ($i = 0; $i < count($rects); $i++) {
             for ($j = $i + 1; $j < count($rects); $j++) {
                 [$ca, $ax, $ay, $aw, $ah] = $rects[$i];
                 [$cb, $bx, $by, $bw, $bh] = $rects[$j];
                 $overlap = $ax < $bx + $bw && $bx < $ax + $aw && $ay < $by + $bh && $by < $ay + $ah;
                 $this->assertFalse($overlap, "{$ca} overlaps {$cb}");
+            }
+        }
+    }
+
+    public function test_goal_end_blocks_do_not_share_vertical_range_with_main_or_back(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+
+        $goalEnds = Block::whereHas('stand', fn ($q) => $q->whereIn('code', ['NORTH', 'SOUTH']))->get();
+        $sides = Block::whereHas('stand', fn ($q) => $q->whereIn('code', ['MAIN', 'BACK']))->get();
+        $this->assertCount(32, $goalEnds);
+
+        foreach ($goalEnds as $g) {
+            foreach ($sides as $s) {
+                $overlap = $g->geometry['y'] < $s->geometry['y'] + $s->geometry['h']
+                    && $s->geometry['y'] < $g->geometry['y'] + $g->geometry['h'];
+                $this->assertFalse($overlap, "{$g->code} shares vertical range with {$s->code}");
             }
         }
     }

@@ -145,7 +145,7 @@ class AdminAllocationApiTest extends TestCase
 
         $this->assertTrue($res->json('editable'));
         $this->assertSame($this->match->id, $res->json('match.id'));
-        $this->assertSame(['width' => 1000, 'height' => 700], $res->json('viewbox'));
+        $this->assertSame(['width' => 1000, 'height' => 760], $res->json('viewbox'));
         $blocks = collect($res->json('blocks'))->keyBy('id');
         $this->assertCount(3, $blocks);
         $this->assertEqualsCanonicalizing(

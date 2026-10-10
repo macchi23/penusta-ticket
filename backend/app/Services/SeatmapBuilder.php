@@ -34,7 +34,7 @@ class SeatmapBuilder
     {
         return [
             'match' => $this->formatMatch($match),
-            'viewbox' => ['width' => 1000, 'height' => 700],
+            'viewbox' => ['width' => 1000, 'height' => 760],
         ];
     }
 
