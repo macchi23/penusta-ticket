@@ -62,6 +62,17 @@ final class SeededRandom
         return $key;
     }
 
+    /** v4 形式の UUID（乱数のバイト列から作る） */
+    public function uuid(): string
+    {
+        $bytes = $this->randomizer->getBytes(16);
+        $bytes[6] = chr((ord($bytes[6]) & 0x0F) | 0x40);
+        $bytes[8] = chr((ord($bytes[8]) & 0x3F) | 0x80);
+        $hex = bin2hex($bytes);
+
+        return substr($hex, 0, 8).'-'.substr($hex, 8, 4).'-'.substr($hex, 12, 4).'-'.substr($hex, 16, 4).'-'.substr($hex, 20);
+    }
+
     public function poisson(float $lambda): int
     {
         $limit = exp(-$lambda);

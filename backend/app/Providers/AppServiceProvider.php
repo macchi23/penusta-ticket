@@ -5,6 +5,8 @@ namespace App\Providers;
 use App\Http\Controllers\Api\DemoUserController;
 use App\Models\User;
 use App\Services\ActivityRecorder;
+use App\Support\DemoData\DemandModel;
+use App\Support\DemoData\ProvisionalDemandModel;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
@@ -20,7 +22,7 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        //
+        $this->app->bind(DemandModel::class, ProvisionalDemandModel::class);
     }
 
     /**

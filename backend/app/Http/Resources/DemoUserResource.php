@@ -3,6 +3,7 @@
 namespace App\Http\Resources;
 
 use App\Models\User;
+use App\Support\DemoData\DemoScenario;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -20,7 +21,17 @@ class DemoUserResource extends JsonResource
             'birth_date' => $this->birth_date?->toDateString(),
             'prefecture' => $this->prefecture,
             'role' => $this->role->value,
-            'memberships' => $this->memberships->pluck('kind')->values()->all(),
+            'memberships' => $this->activeMembershipKinds(),
         ];
+    }
+
+    /** AS_OF 時点で有効な会員種別だけ（7 シーズン分の履歴が全部出ないように） */
+    private function activeMembershipKinds(): array
+    {
+        $today = DemoScenario::asOf()->format('Y-m-d');
+
+        return $this->memberships
+            ->filter(fn ($m) => $m->valid_from->toDateString() <= $today && $m->valid_until->toDateString() >= $today)
+            ->pluck('kind')->unique()->values()->all();
     }
 }
