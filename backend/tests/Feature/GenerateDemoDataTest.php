@@ -3,6 +3,8 @@
 namespace Tests\Feature;
 
 use App\Console\Commands\GenerateDemoData;
+use App\Models\FootballMatch;
+use App\Services\SeasonPass\SeasonPassIssuer;
 use App\Support\DemoData\DemandModel;
 use App\Support\DemoData\DemoScenario;
 use App\Support\DemoData\SeasonPassSeating;
@@ -25,7 +27,7 @@ class GenerateDemoDataTest extends TestCase
     private function fingerprint(): array
     {
         $result = [];
-        foreach (['users', 'memberships', 'orders', 'tickets', 'order_items', 'events'] as $table) {
+        foreach (['users', 'memberships', 'season_pass_seats', 'orders', 'tickets', 'order_items', 'events'] as $table) {
             $result[$table] = DB::selectOne("select count(*) c, md5(coalesce(string_agg(t::text, ',' order by id), '')) h from {$table} t");
         }
 
@@ -98,12 +100,11 @@ class GenerateDemoDataTest extends TestCase
         $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join orders o on o.id = i.order_id where i.ticket_type_id = ? and not exists (select 1 from memberships m where m.user_id = o.user_id and m.kind = 'season_pass' and m.valid_from <= (o.ordered_at at time zone 'Asia/Tokyo')::date and m.valid_until >= (o.ordered_at at time zone 'Asia/Tokyo')::date)", [$passTypeId])->c);
         $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join orders o on o.id = i.order_id where i.ticket_type_id = ? group by o.user_id, o.match_id having count(*) > 1) x', [$passTypeId])->c);
 
-        // 未販売の試合には何も無い
+        // 未販売の試合に一般販売は無い（年パスの固定席は全試合に発行される）
         $unsold = DB::table('matches')->whereRaw("(attributes->>'unsold') = 'true'")->pluck('id')->all();
         $this->assertNotEmpty($unsold);
-        $this->assertSame(0, DB::table('orders')->whereIn('match_id', $unsold)->count());
-        // tickets.created_at は timestamp（タイムゾーン無し）なので UTC の値で比べる（AS_OF = 2026-10-08 00:00 JST）
-        $this->assertSame(0, DB::table('tickets')->whereIn('match_id', $unsold)->count());
+        $this->assertSame(0, DB::table('orders')->whereIn('match_id', $unsold)->where('kind', 'purchase')->count());
+        $this->assertSame(0, DB::table('tickets')->whereIn('match_id', $unsold)->whereNull('season_pass_seat_id')->count());
         $this->assertSame(0, DB::table('events')->whereIn(DB::raw("(payload->>'match_id')::int"), $unsold)->count());
     }
 
@@ -120,7 +121,9 @@ class GenerateDemoDataTest extends TestCase
         // 引換はアウェー割当のブロックには無い。1 ユーザー 1 シーズンで同じブロック・席に固定される
         $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join tickets t on t.id = i.ticket_id join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id where i.ticket_type_id = ? and a.allocation <> 'home'", [$passTypeId])->c);
         $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join tickets t on t.id = i.ticket_id join orders o on o.id = i.order_id join matches m on m.id = t.match_id where i.ticket_type_id = ? group by m.season_id, o.user_id having count(distinct t.block_id) > 1 or count(distinct t.seat_id) > 1) x', [$passTypeId])->c);
-        // 年パスの券種は一般販売の注文に混ざらない（引換の注文は 1 枚だけ）
+        // 年パスの券種は、年パスの発行（kind=season_pass、固定席の券、0 円）だけ
+        $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join orders o on o.id = i.order_id join tickets t on t.id = i.ticket_id where (i.ticket_type_id = ?) <> (o.kind = 'season_pass') or (o.kind = 'season_pass') <> (t.season_pass_seat_id is not null) or (o.kind = 'season_pass' and (o.total <> 0 or i.price <> 0 or o.channel <> 'system' or o.sale_phase_id is not null))", [$passTypeId])->c);
+        // 年パスの券種は一般販売の注文に混ざらない（発行の注文は 1 枚だけ）
         $this->assertSame(0, DB::selectOne('select count(*) c from (select i.order_id from order_items i group by i.order_id having bool_or(i.ticket_type_id = ?) and count(*) > 1) x', [$passTypeId])->c);
     }
 
@@ -129,11 +132,106 @@ class GenerateDemoDataTest extends TestCase
         $this->seed(DatabaseSeeder::class);
         $this->generate(3, 0.05);
 
-        $presale = "o.ordered_at < m.kickoff_at - interval '35 days'";
+        $presale = "o.kind = 'purchase' and o.ordered_at < m.kickoff_at - interval '35 days'";
         $this->assertGreaterThan(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where $presale")->c);
         $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where $presale and not exists (select 1 from memberships f where f.user_id = o.user_id and f.kind = 'fanclub' and f.valid_from <= (o.ordered_at at time zone 'Asia/Tokyo')::date and f.valid_until >= (o.ordered_at at time zone 'Asia/Tokyo')::date)")->c);
         // 先行の前（キックオフの 42 日より前）には誰も買えない
-        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.ordered_at < m.kickoff_at - interval '42 days'")->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.kind = 'purchase' and o.ordered_at < m.kickoff_at - interval '42 days'")->c);
+    }
+
+    public function test_purchase_orders_follow_sale_phases(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(3, 0.05);
+
+        $this->assertGreaterThan(0, DB::table('orders')->where('kind', 'purchase')->count());
+        // 注文時刻を含むフェーズがあり、その eligibility を満たす（会員判定は JST 暦日・両端含む）
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o
+            where o.kind = 'purchase' and not exists (
+              select 1 from sale_phases p where p.match_id = o.match_id and o.ordered_at >= p.starts_at and o.ordered_at < p.ends_at
+                and (p.eligibility is null or exists (select 1 from memberships m where m.user_id = o.user_id and m.kind = p.eligibility
+                  and m.valid_from <= (o.ordered_at at time zone 'Asia/Tokyo')::date and m.valid_until >= (o.ordered_at at time zone 'Asia/Tokyo')::date)))")->c);
+        // sale_phase_id は注文時刻を含むフェーズ。年パスの発行は null
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o left join sale_phases p on p.id = o.sale_phase_id
+            where o.kind = 'purchase' and (p.id is null or p.match_id <> o.match_id or o.ordered_at < p.starts_at or o.ordered_at >= p.ends_at)")->c);
+        $this->assertSame(0, DB::table('orders')->where('kind', 'season_pass')->whereNotNull('sale_phase_id')->count());
+        // 一般販売の終わりは kickoff を含まない
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.kind = 'purchase' and o.ordered_at >= m.kickoff_at")->c);
+        // 両方のフェーズに注文がある
+        $this->assertSame(2, DB::selectOne("select count(distinct p.kind) c from orders o join sale_phases p on p.id = o.sale_phase_id where o.kind = 'purchase'")->c);
+    }
+
+    public function test_generator_reads_sale_phases_from_the_database(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $ids = DB::table('matches')->join('seasons', 'seasons.id', '=', 'matches.season_id')
+            ->whereIn('seasons.name', ['2026-27', '2026 ハーフ'])->whereRaw("coalesce((matches.attributes->>'unsold')::boolean, false) = false")
+            ->orderBy('matches.id')->pluck('matches.id')->all();
+        $noPhases = array_shift($ids);
+        $presaleOnly = array_shift($ids);
+        // 残りの試合はテンプレートからずらす: general = −20d〜kickoff の 2 日前、FC 先行 = −50d〜−20d（general を先に縮めて EXCLUDE を避ける）
+        $shifted = $ids;
+        DB::table('sale_phases')->where('match_id', $noPhases)->delete();
+        DB::table('sale_phases')->where('match_id', $presaleOnly)->where('kind', 'general')->delete();
+        DB::statement("update sale_phases p set starts_at = m.kickoff_at - interval '20 days', ends_at = m.kickoff_at - interval '2 days' from matches m where m.id = p.match_id and p.kind = 'general' and p.match_id = any (?::bigint[])", ['{'.implode(',', $shifted).'}']);
+        DB::statement("update sale_phases p set starts_at = m.kickoff_at - interval '50 days', ends_at = m.kickoff_at - interval '20 days' from matches m where m.id = p.match_id and p.kind = 'fanclub_presale' and p.match_id = any (?::bigint[])", ['{'.implode(',', $shifted).'}']);
+
+        $this->generate(2, 0.05);
+        $in = implode(',', $shifted);
+
+        // 全 purchase がフェーズの内側・資格あり・sale_phase_id 一致
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o
+            where o.kind = 'purchase' and not exists (
+              select 1 from sale_phases p where p.id = o.sale_phase_id and p.match_id = o.match_id and o.ordered_at >= p.starts_at and o.ordered_at < p.ends_at
+                and (p.eligibility is null or exists (select 1 from memberships m where m.user_id = o.user_id and m.kind = p.eligibility
+                  and m.valid_from <= (o.ordered_at at time zone 'Asia/Tokyo')::date and m.valid_until >= (o.ordered_at at time zone 'Asia/Tokyo')::date)))")->c);
+        // 境界のずれが結果に効いている: 販売の終わり（kickoff の 2 日前）以降は無く、従来の 42 日前より前・35 日前〜20 日前の FC 先行にも注文がある
+        $this->assertGreaterThan(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.kind = 'purchase' and o.match_id in ($in) and o.ordered_at < m.kickoff_at - interval '42 days'")->c);
+        $this->assertGreaterThan(0, DB::selectOne("select count(*) c from orders o join matches m on m.id = o.match_id where o.kind = 'purchase' and o.match_id in ($in) and o.ordered_at >= m.kickoff_at - interval '20 days'")->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join sale_phases p on p.match_id = o.match_id and p.kind = 'general' where o.kind = 'purchase' and o.match_id in ($in) and o.ordered_at >= p.ends_at")->c);
+        $this->assertGreaterThan(0, DB::selectOne("select count(*) c from orders o join sale_phases p on p.id = o.sale_phase_id where o.kind = 'purchase' and o.match_id in ($in) and p.kind = 'general'")->c);
+        // フェーズが無い試合には購入が無い。FC 先行だけの試合は FC 先行の注文だけ
+        $this->assertSame(0, DB::table('orders')->where('kind', 'purchase')->where('match_id', $noPhases)->count());
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o left join sale_phases p on p.id = o.sale_phase_id where o.kind = 'purchase' and o.match_id = ? and (p.id is null or p.kind <> 'fanclub_presale')", [$presaleOnly])->c);
+    }
+
+    public function test_generated_season_pass_tickets_match_the_issuer(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(2, 0.05);
+
+        $seats = DB::table('season_pass_seats')->count();
+        $this->assertGreaterThan(0, $seats);
+        // 固定席の数はシーズンの年パス会員数（席の割当が尽きない規模）。発行数は 会員数 × 試合数
+        foreach (DB::table('season_pass_seats')->selectRaw('season_id, count(*) c')->groupBy('season_id')->get() as $row) {
+            $season = DB::table('seasons')->where('id', $row->season_id)->first();
+            $holders = DB::table('memberships')->where('kind', 'season_pass')->where('valid_until', $season->ends_on)->count();
+            $matches = DB::table('matches')->where('season_id', $row->season_id)->count();
+            $this->assertSame($holders, $row->c);
+            $this->assertSame($holders * $matches, DB::table('tickets as t')->join('matches as m', 'm.id', '=', 't.match_id')
+                ->where('m.season_id', $row->season_id)->whereNotNull('t.season_pass_seat_id')->count());
+        }
+        // 発行時刻はそのシーズンの年パスの valid_from（JST 0 時）。行動ログは出さない
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o join tickets t on t.match_id = o.match_id
+            join order_items i on i.order_id = o.id and i.ticket_id = t.id join season_pass_seats s on s.id = t.season_pass_seat_id
+            join memberships ms on ms.user_id = s.user_id and ms.kind = 'season_pass'
+            join seasons se on se.id = s.season_id and ms.valid_until = se.ends_on
+            where o.kind = 'season_pass' and o.ordered_at <> (ms.valid_from::timestamp at time zone 'Asia/Tokyo')")->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from events e join orders o on o.id = (e.payload->>'order_id')::bigint where e.event_type = 'purchase' and o.kind = 'season_pass'")->c);
+
+        // 固定席（season_pass_seats.seat_id）に一般販売の注文は無い
+        $this->assertSame(0, DB::selectOne("select count(*) c from tickets t
+            join order_items i on i.ticket_id = t.id join orders o on o.id = i.order_id
+            join matches m on m.id = t.match_id join season_pass_seats s on s.season_id = m.season_id and s.seat_id = t.seat_id
+            where o.kind = 'purchase'")->c);
+
+        // アプリの発行処理を全試合に流しても新規発行は 0 枚
+        $issuer = $this->app->make(SeasonPassIssuer::class);
+        $issued = 0;
+        foreach (FootballMatch::whereIn('season_id', DB::table('season_pass_seats')->distinct()->pluck('season_id'))->get() as $match) {
+            $issued += $issuer->issueForMatch($match);
+        }
+        $this->assertSame(0, $issued);
     }
 
     public function test_bad_weather_cuts_orders_in_the_last_three_days(): void
@@ -236,6 +334,31 @@ class GenerateDemoDataTest extends TestCase
         $this->assertGreaterThan(0, DB::selectOne('select count(*) c from order_items where ticket_type_id = ?', [$passTypeId])->c);
         $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join tickets t on t.id = i.ticket_id
             where i.ticket_type_id = ? and exists (select 1 from match_block_allocations a where a.block_id = t.block_id and a.allocation <> 'home')", [$passTypeId])->c);
+    }
+
+    public function test_issuer_reissues_deleted_pass_tickets_for_generated_data(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(2, 0.05);
+
+        $seasonIds = DB::table('season_pass_seats')->distinct()->pluck('season_id');
+        $unsold = DB::table('matches')->whereIn('season_id', $seasonIds)->whereRaw("(attributes->>'unsold') = 'true'")->orderBy('id')->value('id');
+        $matchIds = DB::table('matches')->whereIn('season_id', $seasonIds)->orderBy('id')->pluck('id')->all();
+        $targets = array_values(array_unique(array_filter([$matchIds[0], $matchIds[intdiv(count($matchIds), 2)], end($matchIds), $unsold])));
+        $this->assertGreaterThanOrEqual(3, count($targets));
+        $issuer = $this->app->make(SeasonPassIssuer::class);
+
+        foreach ($targets as $matchId) {
+            $ticketIds = DB::table('tickets')->where('match_id', $matchId)->whereNotNull('season_pass_seat_id')->pluck('id')->all();
+            $this->assertNotEmpty($ticketIds);
+            $orderIds = DB::table('order_items')->whereIn('ticket_id', $ticketIds)->pluck('order_id')->all();
+            DB::table('order_items')->whereIn('ticket_id', $ticketIds)->delete();
+            DB::table('tickets')->whereIn('id', $ticketIds)->delete();
+            DB::table('orders')->whereIn('id', $orderIds)->delete();
+
+            $this->assertSame(count($ticketIds), $issuer->issueForMatch(FootballMatch::findOrFail($matchId)));
+            $this->assertSame(count($ticketIds), DB::table('tickets')->where('match_id', $matchId)->whereNotNull('season_pass_seat_id')->count());
+        }
     }
 
     public function test_keeps_test_user_and_admin_with_stable_ids(): void

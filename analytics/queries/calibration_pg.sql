@@ -5,7 +5,7 @@
 --   docker compose exec -T db psql -U penusta -d penusta_test -f - < analytics/queries/calibration_pg.sql
 -- 分母（販売可能席数）= その試合で home に割り当てたブロックの capacity − 年パスの固定席。固定席の数は SeasonPassSeating::split と同じ式
 -- （ゴール裏 65% / バック 25% / 残りメイン）で、シーズンの年パス会員数から出す。
--- 販売率は年パスの引換（season_pass 券種）を除いた一般販売の枚数 / 販売可能席数。
+-- 販売率は一般販売の注文（orders.kind = 'purchase'。年パスの発行分は kind = 'season_pass' で除く）の枚数 / 販売可能席数。
 -- 完売ブロックは、固定席の数をブロックごとには持てないので、固定席を同じ席種の「常に home のブロック」で均等割りした
 -- 見込みの販売可能席数の :sold_out_ratio 以上を売ったものとする（近似）。
 -- 対象は AS_OF（2026-10-08 JST）までにキックオフした、未販売でない試合。
@@ -54,8 +54,8 @@ JOIN cal_type t ON t.block_id = a.block_id
 JOIN cal_pass p ON p.season_id = cm.season_id
 LEFT JOIN (
   SELECT tk.match_id, tk.block_id, count(*) AS sold
-  FROM tickets tk JOIN order_items i ON i.ticket_id = tk.id
-  WHERE i.ticket_type_id <> (SELECT id FROM ticket_types WHERE code = 'season_pass')
+  FROM tickets tk JOIN order_items i ON i.ticket_id = tk.id JOIN orders o ON o.id = i.order_id
+  WHERE o.kind = 'purchase'
   GROUP BY tk.match_id, tk.block_id
 ) g ON g.match_id = cm.match_id AND g.block_id = t.block_id;
 
@@ -119,16 +119,18 @@ FROM (
   FROM cal_block WHERE allocation = 'home' GROUP BY match_id, promo
 ) x;
 
-\echo '== 5. 年パスの空席率 = 1 - 引換枚数 / (年パス会員数 x 試合数)'
-CREATE TEMP TABLE cal_redeemed AS
-SELECT tk.match_id, count(*) AS redeemed
-FROM tickets tk JOIN order_items i ON i.ticket_id = tk.id
-WHERE i.ticket_type_id = (SELECT id FROM ticket_types WHERE code = 'season_pass')
-GROUP BY tk.match_id;
-
-SELECT cm.season, p.holders, count(*) AS matches,
-       round(1 - sum(coalesce(r.redeemed, 0))::numeric / nullif(p.holders * count(*), 0), 3) AS empty_rate
-FROM cal_match cm
-JOIN cal_pass p ON p.season_id = cm.season_id
-LEFT JOIN cal_redeemed r ON r.match_id = cm.match_id
-GROUP BY cm.season, p.holders ORDER BY cm.season;
+\echo '== 5. 年パスの発行数の検証: 発行数 = 年パス会員数 x そのシーズンの試合数（未販売の試合・AS_OF 以降の試合も含む全試合）。diff = 0 が正'
+SELECT s.name AS season, p.holders, count(*) AS matches, p.holders * count(*) AS expected,
+       sum(coalesce(r.issued, 0)) AS issued,
+       sum(coalesce(r.issued, 0)) - p.holders * count(*) AS diff
+FROM seasons s
+JOIN cal_pass p ON p.season_id = s.id
+JOIN matches m ON m.season_id = s.id
+LEFT JOIN (
+  SELECT tk.match_id, count(*) AS issued
+  FROM tickets tk JOIN order_items i ON i.ticket_id = tk.id JOIN orders o ON o.id = i.order_id
+  WHERE o.kind = 'season_pass'
+  GROUP BY tk.match_id
+) r ON r.match_id = m.id
+WHERE EXISTS (SELECT 1 FROM season_pass_seats q WHERE q.season_id = s.id)
+GROUP BY s.name, p.holders ORDER BY s.name;

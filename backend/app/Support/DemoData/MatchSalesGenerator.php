@@ -7,31 +7,28 @@ namespace App\Support\DemoData;
  * 他の試合や --seasons の値に影響されない。AS_OF より後の注文・イベントは作らない（捨てるだけで詰め直さない）。
  *
  * 流れ: 制約なしの需要でブロックごとに注文を作る → 時刻順に並べてブロックの残りで打ち切る（あふれた分は離脱セッション）
- * → 年パス会員の引換を固定席に作る → 買わずに離脱するセッションを足す。
+ * → 買わずに離脱するセッションを足す。
+ * 年パスの固定席は issuePasses() が試合ごとに全員分を発行する（購入の乱数とは独立）。
+ * 販売フェーズ（FC 先行 → 一般）は MatchContext が持つ sale_phases の期間で、注文はフェーズの期間と資格を満たす時刻にだけ作る。
  */
 final class MatchSalesGenerator
 {
     /** これより前の注文・イベントは作らない（2021-01-01 00:00 UTC）。注文はこの 1 時間後以降 */
     public const EARLIEST_EPOCH = 1_609_459_200;
 
-    /** 一般販売はキックオフのこの日数前から。FC の先行販売はその前の PRESALE_DAYS 日間 */
-    public const GENERAL_SALE_DAYS = 35;
-
-    public const PRESALE_DAYS = 7;
-
     /** 雨・雪の試合で、キックオフのこの日数前以降の注文を落とす割合 */
     public const BAD_WEATHER_WINDOW_DAYS = 3;
 
     public const BAD_WEATHER_DROP = 0.35;
-
-    /** 年パス会員が試合ごとに引き換える確率 */
-    public const PASS_REDEEM_RATE = 0.85;
 
     private const SETTLE_SECONDS = 3600;
 
     private const MAX_REDRAWS = 20;
 
     private readonly int $asOf;
+
+    /** @var array<int, int> ユーザー添字 => season_pass_seats.id（writePassSeats で埋める） */
+    private array $passSeatIds = [];
 
     /**
      * @param  array<string, int>  $ticketTypeIds  code => id
@@ -94,7 +91,11 @@ final class MatchSalesGenerator
             for ($ticketsDrawn = 0; $ticketsDrawn < $wanted;) {
                 $size = min($wanted - $ticketsDrawn, $this->demand->orderSize($match, $block, $orderRng));
                 $ticketsDrawn += $size;
-                [$buyer, $orderedAt] = $this->drawBuyerAndTime($match, $block->categoryType, $demand->index, $orderRng, $joinedBy);
+                $drawn = $this->drawBuyerAndTime($match, $block->categoryType, $demand->index, $orderRng, $joinedBy);
+                if ($drawn === null) {
+                    continue;
+                }
+                [$buyer, $orderedAt] = $drawn;
                 if ($badWeather && $orderedAt >= $match->kickoffAt - self::BAD_WEATHER_WINDOW_DAYS * 86400 && $orderRng->chance(self::BAD_WEATHER_DROP)) {
                     $dropped[] = [$buyer, $orderedAt];
 
@@ -136,8 +137,6 @@ final class MatchSalesGenerator
             }
         }
 
-        $this->emitPassRedemptions($match, $blocks, $prices, $matchIndex, $root->fork('passes'), $funnelRng);
-
         $sessions = (int) round($purchases * $this->browse);
         for ($i = 0; $i < $sessions; $i++) {
             $this->emitDropoff($match, $matchIndex, $dropoffRng);
@@ -145,26 +144,34 @@ final class MatchSalesGenerator
     }
 
     /**
-     * 買い手と注文時刻を引く。先行販売の期間（一般販売の開始より前）に落ちたら FC 会員でなければ引き直す。
+     * 買い手と注文時刻を引く。注文時刻を含むフェーズの資格（FC 先行なら FC 会員）を満たさなければ引き直す。
      * FC の重みは会員期間を見ずに付けているので、まだ会員でない時点の注文に当たったら重みの分だけ棄却して引き直す
      *
-     * @return array{0: int, 1: int} [ユーザー添字, 注文時刻]
+     * 引き直しを尽くしてもフェーズの期間・資格を満たす時刻が作れない試合（フェーズが無い、資格を問わないフェーズが無い等）は null（注文を作らない）
+     *
+     * @return array{0: int, 1: int}|null [ユーザー添字, 注文時刻]
      */
-    private function drawBuyerAndTime(MatchContext $match, string $categoryType, float $index, SeededRandom $rng, int $joinedBy): array
+    private function drawBuyerAndTime(MatchContext $match, string $categoryType, float $index, SeededRandom $rng, int $joinedBy): ?array
     {
-        $generalStart = $match->kickoffAt - self::GENERAL_SALE_DAYS * 86400;
+        $openStart = $match->openPhase()->startsAt ?? $match->kickoffAt - 1;
+        $lastOrderAt = min($match->kickoffAt, $match->salesEnd()) - 1;
 
         for ($try = 1; ; $try++) {
-            $lead = $this->drawLead($index, $rng, (self::GENERAL_SALE_DAYS + self::PRESALE_DAYS) * 1440);
+            $lead = $this->drawLead($index, $rng, intdiv($match->kickoffAt - $match->salesStart(), 60));
             $buyer = $this->crowd->pickBuyer($categoryType, $rng, $joinedBy);
             $lowerBound = max(self::EARLIEST_EPOCH, $this->crowd->joinedAt($buyer)) + self::SETTLE_SECONDS;
-            $orderedAt = $this->settle($match, $match->kickoffAt - $lead * 60, $lowerBound, $rng);
+            $orderedAt = $this->settle($match, $match->kickoffAt - $lead * 60, $lowerBound, $rng, $lastOrderAt);
 
-            $presaleOk = $orderedAt >= $generalStart || $this->crowd->isFanclubAt($buyer, $orderedAt);
+            $phase = $match->phaseAt($orderedAt);
+            $presaleOk = $phase !== null && $this->isEligible($buyer, $phase, $orderedAt);
             $weightOk = ! $this->crowd->isOverweightedAt($buyer, $orderedAt) || $rng->chance(1 / SeasonCrowd::FANCLUB_WEIGHT);
             if ($try >= self::MAX_REDRAWS || ($presaleOk && $weightOk)) {
                 if (! $presaleOk) {
-                    $orderedAt = min($match->kickoffAt, max($generalStart, $lowerBound) + $rng->int(0, 86399));
+                    $orderedAt = min($lastOrderAt, max($openStart, $lowerBound) + $rng->int(0, 86399));
+                    $phase = $match->phaseAt($orderedAt);
+                    if ($phase === null || ! $this->isEligible($buyer, $phase, $orderedAt)) {
+                        return null;
+                    }
                 }
 
                 return [$buyer, $orderedAt];
@@ -185,38 +192,52 @@ final class MatchSalesGenerator
         return $rng->int(0, $maxMinutes);
     }
 
-    /**
-     * 年パス会員の引換。固定席に、毎試合 PASS_REDEEM_RATE の確率で 1 枚（price は年パス引換の価格）。時期は一般と同じ分布で、先行期間には入れない
-     *
-     * @param  list<array{block: BlockInfo, allocation: string}>  $blocks
-     * @param  array<int, array<int, int>>  $prices
-     */
-    private function emitPassRedemptions(MatchContext $match, array $blocks, array $prices, float $matchIndex, SeededRandom $rng, SeededRandom $funnelRng): void
+    private function isEligible(int $buyer, SalePhaseWindow $phase, int $at): bool
     {
-        $byId = [];
-        foreach ($blocks as ['block' => $block, 'allocation' => $allocation]) {
-            if ($allocation === 'home') {
-                $byId[$block->id] = $block;
-            }
+        return match ($phase->eligibility) {
+            null => true,
+            MembershipPlan::FANCLUB => $this->crowd->isFanclubAt($buyer, $at),
+            MembershipPlan::SEASON_PASS => $this->crowd->hasSeasonPassAt($buyer, $at),
+            default => false,
+        };
+    }
+
+    /**
+     * シーズンの年パス固定席を season_pass_seats に書く。user 添字の昇順に id を振り、holder => 行 id を覚える
+     */
+    public function writePassSeats(SeasonSpan $span): void
+    {
+        $this->passSeatIds = [];
+        foreach ($this->seating->holders() as $holder) {
+            $id = $this->sink->nextId('season_pass_seats');
+            $this->passSeatIds[$holder] = $id;
+            $created = PgCopy::timestamp($this->crowd->passFrom($holder));
+            $this->sink->add('season_pass_seats', [
+                $id, $span->seasonId, $this->crowd->userId($holder), $this->seating->blockOf($holder), $this->seating->seatOf($holder), $created, $created,
+            ]);
         }
+        $this->sink->flush();
+    }
+
+    /**
+     * 1 試合分の年パス発行。固定席を持つ会員全員に、SeasonPassIssuer と同じ形（kind=season_pass の 0 円の注文 + 明細 + チケット）で作る。
+     * 発行時刻は年パスの valid_from（JST 0 時）。AS_OF より後の試合でも発行する。行動ログは作らない
+     */
+    public function issuePasses(MatchContext $match): void
+    {
+        $rng = new SeededRandom($this->seed, 'passissue:'.$match->matchId);
         $typeId = $this->ticketTypeIds['season_pass'];
 
         foreach ($this->seating->holders() as $holder) {
-            $shows = $rng->chance(self::PASS_REDEEM_RATE);
-            $block = $byId[$this->seating->blockOf($holder)] ?? null;
-            $joined = $this->crowd->joinedAt($holder);
-            if (! $shows || $block === null || $joined > $match->kickoffAt - 2 * self::SETTLE_SECONDS) {
-                continue;
-            }
+            $issuedAt = $this->crowd->passFrom($holder);
+            $created = PgCopy::timestamp($issuedAt);
+            $orderId = $this->sink->nextId('orders');
+            $ticketId = $this->sink->nextId('tickets');
 
-            $lowerBound = max(self::EARLIEST_EPOCH, $joined, $this->crowd->passFrom($holder)) + self::SETTLE_SECONDS;
-            $orderedAt = $this->settle($match, $match->kickoffAt - $this->drawLead($matchIndex, $rng, self::GENERAL_SALE_DAYS * 1440) * 60, $lowerBound, $rng);
-            $channel = $rng->weighted(['web' => 70, 'app' => 20, 'convenience_store' => 10]);
-            if ($orderedAt > $this->asOf) {
-                continue;
-            }
-            $items = [[$this->seating->seatOf($holder), $typeId, $prices[$block->seatCategoryId][$typeId] ?? 0]];
-            $this->emitOrder($match, $block, $holder, $items, $orderedAt, $channel, $rng, $funnelRng);
+            $this->sink->add('orders', [$orderId, $this->crowd->userId($holder), $match->matchId, 'paid', 'season_pass', null, 0, 'system', PgCopy::timestampTz($issuedAt), $created, $created]);
+            $this->sink->add('tickets', [$ticketId, $match->matchId, $this->seating->blockOf($holder), $this->seating->seatOf($holder), 'paid', $rng->uuid(), null, $this->passSeatIds[$holder], $created, $created]);
+            $this->sink->add('order_items', [$orderId, $ticketId, $typeId, 0, $created, $created]);
+            $this->sink->checkpoint();
         }
     }
 
@@ -268,16 +289,17 @@ final class MatchSalesGenerator
         $userId = $this->crowd->userId($buyerIndex);
         $orderId = $this->sink->nextId('orders');
         $created = PgCopy::timestamp($orderedAt);
+        $phaseId = $match->phaseAt($orderedAt)?->id;
         $total = 0;
 
         foreach ($items as [$seatId, $typeId, $price]) {
             $ticketId = $this->sink->nextId('tickets');
             $total += $price;
-            $this->sink->add('tickets', [$ticketId, $match->matchId, $block->id, $seatId, 'paid', $orderRng->uuid(), null, $created, $created]);
+            $this->sink->add('tickets', [$ticketId, $match->matchId, $block->id, $seatId, 'paid', $orderRng->uuid(), null, null, $created, $created]);
             $this->sink->add('order_items', [$orderId, $ticketId, $typeId, $price, $created, $created]);
         }
 
-        $this->sink->add('orders', [$orderId, $userId, $match->matchId, 'paid', $total, $channel, PgCopy::timestampTz($orderedAt), $created, $created]);
+        $this->sink->add('orders', [$orderId, $userId, $match->matchId, 'paid', 'purchase', $phaseId, $total, $channel, PgCopy::timestampTz($orderedAt), $created, $created]);
 
         // 購入時刻から逆算し、各ステップを前ステップの 1 分以上後に置く
         $cartOffset = $funnelRng->int(1, 6);
@@ -306,7 +328,8 @@ final class MatchSalesGenerator
         $depth = (int) $rng->weighted([1 => 50, 2 => 30, 3 => 20]);
         $isKnownUser = $rng->chance(0.30);
         $quantity = $rng->int(1, 4);
-        $base = $this->settle($match, $match->kickoffAt - $this->drawLead($matchIndex, $rng, self::GENERAL_SALE_DAYS * 1440) * 60, self::EARLIEST_EPOCH + self::SETTLE_SECONDS, $rng);
+        $openStart = $match->openPhase()->startsAt ?? $match->kickoffAt;
+        $base = $this->settle($match, $match->kickoffAt - $this->drawLead($matchIndex, $rng, intdiv($match->kickoffAt - $openStart, 60)) * 60, self::EARLIEST_EPOCH + self::SETTLE_SECONDS, $rng, $match->kickoffAt);
 
         $userIndex = $isKnownUser ? $this->crowd->pickBrowser($rng, $base) : null;
         $userId = $userIndex === null ? null : $this->crowd->userId($userIndex);
@@ -316,15 +339,15 @@ final class MatchSalesGenerator
 
     /**
      * 下限（データの始まり・入会直後）より前に落ちた時刻は、下限で打ち切らず、下限からキックオフまでの間に散らす
-     * （打ち切ると下限の 1 点に注文が積み上がる）
+     * （打ち切ると下限の 1 点に注文が積み上がる）。$cap（注文は販売の終わり kickoff − 1 秒、行動ログは kickoff）を超えない
      */
-    private function settle(MatchContext $match, int $at, int $lowerBound, SeededRandom $rng): int
+    private function settle(MatchContext $match, int $at, int $lowerBound, SeededRandom $rng, int $cap): int
     {
         if ($at >= $lowerBound) {
-            return min($at, $match->kickoffAt);
+            return min($at, $cap);
         }
 
-        return $lowerBound + $rng->int(0, max(0, $match->kickoffAt - $lowerBound));
+        return min($cap, $lowerBound + $rng->int(0, max(0, $match->kickoffAt - $lowerBound)));
     }
 
     /** @param  array<string, mixed>  $payload */

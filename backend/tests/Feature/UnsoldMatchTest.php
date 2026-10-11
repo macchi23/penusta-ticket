@@ -63,8 +63,9 @@ class UnsoldMatchTest extends TestCase
 
         $this->assertNotEmpty($unsold);
         $this->assertGreaterThan(0, Order::count());
-        $this->assertSame(0, Order::whereIn('match_id', $unsold)->count());
-        $this->assertSame(0, Ticket::whereIn('match_id', $unsold)->count());
+        // 一般販売は無い。年パスの固定席は SeasonPassIssuer と同じく全試合に発行される
+        $this->assertSame(0, Order::whereIn('match_id', $unsold)->where('kind', 'purchase')->count());
+        $this->assertSame(0, Ticket::whereIn('match_id', $unsold)->whereNull('season_pass_seat_id')->count());
         $this->assertSame(0, ActivityEvent::whereIn(DB::raw("(payload->>'match_id')::int"), $unsold)->count());
     }
 }

@@ -18,6 +18,9 @@ final class SeasonCrowd
     /** @var array<int, int> ユーザー添字 => FC の valid_from（epoch） */
     private array $fanclubFrom = [];
 
+    /** 会員の valid_until（シーズン最終日）の翌 JST 0 時（epoch、含まない） */
+    private readonly int $untilEpoch;
+
     /** @var array<string, WeightedSampler> */
     private array $samplers = [];
 
@@ -27,6 +30,7 @@ final class SeasonCrowd
         private readonly SeasonSpan $span,
         private readonly int $userIdOffset,
     ) {
+        $this->untilEpoch = MembershipPlan::validFromEpoch($span->endsOn) + 86400;
         for ($i = 0; $i < $population->count; $i++) {
             if ($population->isActiveIn($i, $span)) {
                 $this->eligible[] = $i;
@@ -56,16 +60,16 @@ final class SeasonCrowd
         return $this->population->joinedAt[$userIndex];
     }
 
-    /** その時点で有効な年パス会員か（有効期間はシーズン終了まで。注文はキックオフ前なので終端は見ない） */
+    /** その時点で有効な年パス会員か（JST の暦日で両端含む） */
     public function hasSeasonPassAt(int $userIndex, int $at): bool
     {
-        return isset($this->passFrom[$userIndex]) && $this->passFrom[$userIndex] <= $at;
+        return isset($this->passFrom[$userIndex]) && $this->passFrom[$userIndex] <= $at && $at < $this->untilEpoch;
     }
 
     /** その時点で有効な FC 会員か */
     public function isFanclubAt(int $userIndex, int $at): bool
     {
-        return isset($this->fanclubFrom[$userIndex]) && $this->fanclubFrom[$userIndex] <= $at;
+        return isset($this->fanclubFrom[$userIndex]) && $this->fanclubFrom[$userIndex] <= $at && $at < $this->untilEpoch;
     }
 
     /**

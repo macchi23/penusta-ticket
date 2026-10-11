@@ -18,6 +18,7 @@ use App\Support\DemoData\MatchStanding;
 use App\Support\DemoData\MembershipPlan;
 use App\Support\DemoData\MembershipPlanner;
 use App\Support\DemoData\PgCopy;
+use App\Support\DemoData\SalePhaseWindow;
 use App\Support\DemoData\SeasonCrowd;
 use App\Support\DemoData\SeasonFormat;
 use App\Support\DemoData\SeasonPassSeating;
@@ -26,6 +27,7 @@ use App\Support\DemoData\SeededRandom;
 use Database\Seeders\MatchSeeder;
 use Database\Seeders\PriceSeeder;
 use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 class GenerateDemoData extends Command
@@ -101,25 +103,31 @@ class GenerateDemoData extends Command
             $seasonMatches = FootballMatch::where('season_id', $span->seasonId)->orderBy('kickoff_at')->orderBy('id')->get();
             $firstId = $seasonMatches->first()?->id;
             $lastId = $seasonMatches->last()?->id;
+            $phases = $this->loadPhases($seasonMatches->pluck('id')->all());
             $matches = 0;
 
+            $generator->writePassSeats($span);
             foreach ($seasonMatches as $match) {
+                $prices = $this->loadPrices($match->id);
+                $attributes = $match->attributes ?? [];
+                $context = new MatchContext(
+                    $match->id,
+                    $match->kickoff_at->getTimestamp(),
+                    $attributes,
+                    $span,
+                    $this->standingBefore($standings, (int) ($attributes['round'] ?? 0)),
+                    $this->priceRatios($prices, $categoryBasePrices),
+                    $match->id === $firstId,
+                    $match->id === $lastId,
+                    $phases[$match->id] ?? [],
+                );
+                // 年パスの固定席は未販売の試合にも発行する（アプリの SeasonPassIssuer が全試合に発行するのと同じ）
+                $generator->issuePasses($context);
                 if ($this->isUnsold($match)) {
                     continue;
                 }
-                $prices = $this->loadPrices($match->id);
-                $attributes = $match->attributes ?? [];
                 $generator->generate(
-                    new MatchContext(
-                        $match->id,
-                        $match->kickoff_at->getTimestamp(),
-                        $attributes,
-                        $span,
-                        $this->standingBefore($standings, (int) ($attributes['round'] ?? 0)),
-                        $this->priceRatios($prices, $categoryBasePrices),
-                        $match->id === $firstId,
-                        $match->id === $lastId,
-                    ),
+                    $context,
                     $this->allocatedBlocks($match->id, $blocks),
                     $seatIds,
                     $prices,
@@ -133,10 +141,11 @@ class GenerateDemoData extends Command
         $this->finish();
 
         $this->info(sprintf(
-            '完了しました（%.1f 秒）。users %d / memberships %d / orders %d / tickets %d / events %d',
+            '完了しました（%.1f 秒）。users %d / memberships %d / season_pass_seats %d / orders %d / tickets %d / events %d',
             microtime(true) - $started,
             $sink->count('users'),
             $sink->count('memberships'),
+            $sink->count('season_pass_seats'),
             $sink->count('orders'),
             $sink->count('tickets'),
             $sink->count('events'),
@@ -168,10 +177,10 @@ class GenerateDemoData extends Command
 
     private function finish(): void
     {
-        foreach (['users', 'orders', 'tickets'] as $table) {
+        foreach (['users', 'orders', 'tickets', 'season_pass_seats'] as $table) {
             $this->resetSequence($table);
         }
-        DB::statement('ANALYZE users, memberships, orders, tickets, order_items, events');
+        DB::statement('ANALYZE users, memberships, season_pass_seats, orders, tickets, order_items, events');
     }
 
     /** @return list<SeasonSpan> 古い順 */
@@ -376,6 +385,27 @@ class GenerateDemoData extends Command
         }
 
         return null;
+    }
+
+    /**
+     * 試合の販売フェーズ（開始の昇順）。生成器はフェーズの期間と資格に注文時刻を合わせる
+     *
+     * @param  list<int>  $matchIds
+     * @return array<int, list<SalePhaseWindow>> match id => フェーズ
+     */
+    private function loadPhases(array $matchIds): array
+    {
+        $phases = [];
+        foreach (DB::table('sale_phases')->whereIn('match_id', $matchIds)->orderBy('starts_at')->orderBy('id')->get() as $row) {
+            $phases[$row->match_id][] = new SalePhaseWindow(
+                $row->id,
+                Carbon::parse($row->starts_at)->getTimestamp(),
+                Carbon::parse($row->ends_at)->getTimestamp(),
+                $row->eligibility,
+            );
+        }
+
+        return $phases;
     }
 
     /** @return array<int, array<int, int>> seat_category_id => ticket_type_id => 価格 */
