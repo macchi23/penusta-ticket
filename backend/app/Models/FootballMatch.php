@@ -71,6 +71,11 @@ class FootballMatch extends Model
         return $this->hasMany(Order::class, 'match_id');
     }
 
+    public function salePhases(): HasMany
+    {
+        return $this->hasMany(SalePhase::class, 'match_id')->orderBy('starts_at');
+    }
+
     public function tickets(): HasMany
     {
         return $this->hasMany(Ticket::class, 'match_id');

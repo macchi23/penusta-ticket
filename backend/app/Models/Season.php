@@ -27,6 +27,11 @@ class Season extends Model
         ];
     }
 
+    public function seasonPassSeats(): HasMany
+    {
+        return $this->hasMany(SeasonPassSeat::class);
+    }
+
     public function matches(): HasMany
     {
         return $this->hasMany(FootballMatch::class);

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\OrderKind;
 use App\Enums\OrderStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
@@ -16,6 +17,8 @@ class Order extends Model
         'user_id',
         'match_id',
         'status',
+        'kind',
+        'sale_phase_id',
         'total',
         'channel',
         'expires_at',
@@ -27,6 +30,7 @@ class Order extends Model
         return [
             'total' => 'integer',
             'status' => OrderStatus::class,
+            'kind' => OrderKind::class,
             'expires_at' => 'immutable_datetime',
             'ordered_at' => 'immutable_datetime',
         ];
@@ -40,6 +44,11 @@ class Order extends Model
     public function match(): BelongsTo
     {
         return $this->belongsTo(FootballMatch::class, 'match_id');
+    }
+
+    public function salePhase(): BelongsTo
+    {
+        return $this->belongsTo(SalePhase::class);
     }
 
     public function items(): HasMany

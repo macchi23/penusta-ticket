@@ -51,3 +51,8 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | レビュー指摘の修正で挙動が変わった（フォーカス枠を `group-focus-visible` から onFocus に変え、マウスでも枠が出るようになった。メインが差分確認で検出）。修正ブリーフに「元の挙動の条件（例: キーボード時のみ）を保つ」を明記する | 1 | 2026-10-08 | 候補 |
 | 定義修正 | implementer が長時間コマンドの待ちで 600 秒無応答になり停止した（P3a）。implementer.md に「10 分近いコマンドは run_in_background + until ループで待つ、先に小さい規模で所要時間を見積もる」を足す案 | 1 | 2026-10-10 | 候補 |
 | 定義修正 | 「全テーブル一致」の決定性テストが列を選んで指紋を取り、bcrypt の salt と order_items の差を見逃した（レビューで検出）。決定性テストは全列比較、除外は理由付きで明示する | 1 | 2026-10-10 | 候補 |
+| hook / check | `app/Models` `app/Services` から `App\Support\DemoData` を use していないかの grep。販売フェーズのテンプレートが生成器の定数に依存した（レビューで検出、`MembershipKind` Enum に寄せて解消） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | researcher のブリーフに、販売モデルの前提（年パス・会員をいつ売るか、途中加入・解約の有無）を最初から書く。調査の途中で前提を追加した（販売フェーズの年パス検討） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | dev-notes.md に「開発 DB の psql ユーザーは `backend/.env` の `DB_USERNAME`（postgres ではない）」を書く（researcher の指摘） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | implementer.md の Feature テストの定石に足す案: `orders_one_pending_per_user_match` を踏むので pending を複数作るときは user / match を分ける、Enum キャストのモデルで CHECK を検証するときは `DB::table()->insert` を使う | 1 | 2026-10-11 | 候補 |
+| 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |

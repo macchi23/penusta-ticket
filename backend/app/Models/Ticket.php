@@ -18,6 +18,7 @@ class Ticket extends Model
         'match_id',
         'block_id',
         'seat_id',
+        'season_pass_seat_id',
         'status',
         'qr_uuid',
         'expires_at',
@@ -58,6 +59,11 @@ class Ticket extends Model
     public function seat(): BelongsTo
     {
         return $this->belongsTo(Seat::class);
+    }
+
+    public function seasonPassSeat(): BelongsTo
+    {
+        return $this->belongsTo(SeasonPassSeat::class);
     }
 
     public function orderItems(): HasMany

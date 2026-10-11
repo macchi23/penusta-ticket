@@ -2,12 +2,14 @@
 
 namespace App\Support\DemoData;
 
+use App\Enums\MembershipKind;
+
 /** 会員の計画。シーズン × 種別ごとに、ユーザー添字 => valid_from（Y-m-d）を持つ */
 final class MembershipPlan
 {
-    public const SEASON_PASS = 'season_pass';
+    public const SEASON_PASS = MembershipKind::SeasonPass->value;
 
-    public const FANCLUB = 'fanclub';
+    public const FANCLUB = MembershipKind::Fanclub->value;
 
     public const KINDS = [self::SEASON_PASS, self::FANCLUB];
 

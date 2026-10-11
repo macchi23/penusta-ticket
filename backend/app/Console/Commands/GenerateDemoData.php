@@ -155,7 +155,7 @@ class GenerateDemoData extends Command
      */
     private function cleanup(): void
     {
-        DB::statement('TRUNCATE events, order_items, tickets, orders, memberships RESTART IDENTITY');
+        DB::statement('TRUNCATE events, order_items, tickets, season_pass_seats, orders, memberships RESTART IDENTITY');
         DB::table('users')->where('email', '!=', 'test@example.com')->where('role', '!=', 'admin')->delete();
         $this->resetSequence('users');
     }

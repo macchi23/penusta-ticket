@@ -47,6 +47,11 @@ class User extends Authenticatable
         return $this->hasMany(Membership::class);
     }
 
+    public function seasonPassSeats(): HasMany
+    {
+        return $this->hasMany(SeasonPassSeat::class);
+    }
+
     public function orders(): HasMany
     {
         return $this->hasMany(Order::class);

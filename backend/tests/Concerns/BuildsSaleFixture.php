@@ -2,10 +2,12 @@
 
 namespace Tests\Concerns;
 
+use App\Enums\MembershipKind;
 use App\Models\Block;
 use App\Models\FootballMatch;
 use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
+use App\Models\SalePhase;
 use App\Models\Season;
 use App\Models\SeatCategory;
 use App\Models\Stadium;
@@ -43,6 +45,37 @@ trait BuildsSaleFixture
             'stadium_id' => $stadium->id, 'kickoff_at' => CarbonImmutable::parse('2030-03-01 10:00:00', 'UTC'),
             'status' => 'on_sale', 'section_label' => 'A',
         ]);
+        $this->makeSalePhases('general');
+    }
+
+    /**
+     * 試合の販売フェーズを作り直す。$state: 'general'（一般販売中・既定）/ 'presale'（FC 先行中）/ 'before'（先行前）。
+     * 基準は now（travelTo していればその時刻）。一般販売の終了は kickoff だが、
+     * now が kickoff に近いときも区間が成り立つよう、開始 + 1 日を下限にする。
+     */
+    private function makeSalePhases(string $state = 'general'): void
+    {
+        $now = CarbonImmutable::now('UTC');
+        $kickoff = CarbonImmutable::instance($this->match->kickoff_at);
+        $this->match->salePhases()->delete();
+
+        [$presaleStart, $generalStart] = match ($state) {
+            'general' => [$now->subDays(10), $now->subDays(3)],
+            'presale' => [$now->subDays(3), $now->addDays(4)],
+            'before' => [$now->addDays(3), $now->addDays(10)],
+        };
+
+        $generalEnd = max($kickoff, $generalStart->addDay());
+
+        foreach ([
+            ['fanclub_presale', MembershipKind::Fanclub->value, $presaleStart, $generalStart],
+            ['general', null, $generalStart, $generalEnd],
+        ] as [$kind, $eligibility, $start, $end]) {
+            SalePhase::create([
+                'match_id' => $this->match->id, 'kind' => $kind, 'eligibility' => $eligibility,
+                'starts_at' => $start, 'ends_at' => $end,
+            ]);
+        }
     }
 
     private function buildSalePricesAndUser(): void
