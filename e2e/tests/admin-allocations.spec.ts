@@ -12,6 +12,13 @@ import {
 } from '../lib/api';
 import { signInAs } from '../lib/session';
 
+const ALLOCATION_LABELS: Record<string, string> = {
+  home: 'ホーム',
+  away: 'アウェー',
+  buffer: '緩衝帯（販売なし）',
+  closed: '閉鎖',
+};
+
 test.describe.serial('管理画面の割当エディタ', () => {
   let adminId: number;
   let customerId: number;
@@ -58,12 +65,14 @@ test.describe.serial('管理画面の割当エディタ', () => {
     customerId = await pickCustomerFor(matchId);
     const { blocks } = await getAdminAllocations(adminId, matchId);
     original = new Map(blocks.map((b) => [b.id, b.allocation]));
-    const homes = blocks.filter((b) => b.allocation === 'home');
-    const t = homes.find((b) => b.seating_type === 'unreserved');
-    if (!t) throw new Error('home の自由席ブロックがない');
+    // 年パスの固定席があるブロックはロックされるので、未ロックの自由席ブロックから選ぶ。
+    // target は緩衝帯に塗る対象なので、元が緩衝帯のものは除く
+    const unlockedUnreserved = blocks.filter((b) => b.seating_type === 'unreserved' && !b.locked);
+    const t = unlockedUnreserved.find((b) => b.allocation !== 'buffer');
+    if (!t) throw new Error('緩衝帯でない未ロックの自由席ブロックがない');
     target = t;
-    const o = homes.find((b) => b.id !== t.id);
-    if (!o) throw new Error('別の home ブロックがない');
+    const o = unlockedUnreserved.find((b) => b.id !== t.id);
+    if (!o) throw new Error('別の未ロック自由席ブロックがない');
     other = o;
   });
 
@@ -103,7 +112,8 @@ test.describe.serial('管理画面の割当エディタ', () => {
     await expect(brush(page, '緩衝帯（販売なし）')).toHaveAttribute('aria-pressed', 'true');
     await block(page, target.code).click();
     await expect(block(page, target.code)).toHaveAttribute('data-allocation', 'buffer');
-    await expect(page.getByText(`${target.code}: ホーム → 緩衝帯（販売なし）`)).toBeVisible();
+    const originalLabel = ALLOCATION_LABELS[target.allocation];
+    await expect(page.getByText(`${target.code}: ${originalLabel} → 緩衝帯（販売なし）`)).toBeVisible();
 
     await page.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.getByRole('status')).toContainText('1 件の割当を保存しました');
@@ -150,18 +160,20 @@ test.describe.serial('管理画面の割当エディタ', () => {
   test('他の管理者が先に変更していると競合として表示される', async ({ page, context }) => {
     await signInAs(context, adminId);
     await page.goto(editorUrl());
+    // other は未ロックの自由席なので home 以外。UI でホームに塗る
     await brush(page, 'ホーム').click();
-    await brush(page, 'アウェー').click();
     await block(page, other.code).click();
-    await expect(block(page, other.code)).toHaveAttribute('data-allocation', 'away');
+    await expect(block(page, other.code)).toHaveAttribute('data-allocation', 'home');
 
-    const res = await patchAllocations(adminId, matchId, [{ block_id: other.id, expected: 'home', allocation: 'buffer' }]);
+    // その間に別の管理者が other を変更する（元の割当と違う値にして、確実に競合させる）
+    const conflicting = other.allocation === 'buffer' ? 'closed' : 'buffer';
+    const res = await patchAllocations(adminId, matchId, [{ block_id: other.id, expected: other.allocation, allocation: conflicting }]);
     expect(res.status).toBe(200);
 
     await page.getByRole('button', { name: '保存', exact: true }).click();
     await expect(page.getByText('競合したブロックがあり保存できませんでした', { exact: false })).toBeVisible();
-    await expect(page.getByText(`${other.code}: 他の管理者が変更済み（現在: 緩衝帯（販売なし））`)).toBeVisible();
-    await expect(block(page, other.code)).toHaveAttribute('data-allocation', 'buffer');
+    await expect(page.getByText(`${other.code}: 他の管理者が変更済み（現在: ${ALLOCATION_LABELS[conflicting]}）`)).toBeVisible();
+    await expect(block(page, other.code)).toHaveAttribute('data-allocation', conflicting);
     await expect(page.getByRole('heading', { name: '変更（0 件）' })).toBeVisible();
   });
 });

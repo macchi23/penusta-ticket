@@ -205,10 +205,13 @@ export async function pickEditableUnsoldMatch(adminId: number): Promise<number> 
     m.sale_phases.some((p) => Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at));
   for (const m of data.filter((x) => x.editable && x.status === 'on_sale' && selling(x))) {
     const { blocks } = await getAdminAllocations(adminId, m.id);
-    if (blocks.every((b) => !b.locked)) return m.id;
+    // 未ロックの自由席ブロックを 2 つ以上探す（ホームブロックが全てロックされている場合に対応）
+    const unlockedUnreserved = blocks.filter((b) => b.seating_type === 'unreserved' && !b.locked);
+    if (unlockedUnreserved.length >= 2) return m.id;
   }
   throw new Error(
-    '未販売試合が無い。dev DB のシード（migrate:fresh --seed）か、kickoff 日付（2027-06 以降は全試合キックオフ済みになる）を確認',
+    '条件を満たす試合が無い。未ロックの自由席ブロックが 2 つ以上ある試合を探してください。' +
+    'dev DB のシード（migrate:fresh --seed）か、kickoff 日付（2027-06 以降は全試合キックオフ済みになる）を確認',
   );
 }
 
