@@ -7,6 +7,7 @@ use App\Models\LeagueMatch;
 use App\Models\LeagueStanding;
 use App\Models\Season;
 use App\Models\Stadium;
+use App\Services\SeasonPass\SalePhaseProvisioner;
 use App\Support\DemoData\DemoLeague;
 use App\Support\DemoData\DemoLeagueBuilder;
 use App\Support\DemoData\DemoScenario;
@@ -49,6 +50,7 @@ class MatchSeeder extends Seeder
         $weather = new Weather($league->baseSeed);
         $holidays = new JapaneseHolidays;
         $teams = DemoScenario::teams();
+        $provisioner = app(SalePhaseProvisioner::class);
 
         // AS_OF より後のホーム戦をキックオフ順に並べ、先頭の数試合だけ販売途中にする
         $future = [];
@@ -99,6 +101,7 @@ class MatchSeeder extends Seeder
                         'round_ratio' => round($fixture->round / $definition->roundCount(), 4),
                     ] + ($isFuture && $fixture->kickoffUtc > $sellingUntil ? [self::UNSOLD_KEY => true] : []),
                 ]);
+                $provisioner->provision($match);
                 $matchIds[$fixture->round] = $match->id;
             }
 

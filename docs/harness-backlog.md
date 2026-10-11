@@ -55,4 +55,6 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | researcher のブリーフに、販売モデルの前提（年パス・会員をいつ売るか、途中加入・解約の有無）を最初から書く。調査の途中で前提を追加した（販売フェーズの年パス検討） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | dev-notes.md に「開発 DB の psql ユーザーは `backend/.env` の `DB_USERNAME`（postgres ではない）」を書く（researcher の指摘） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | implementer.md の Feature テストの定石に足す案: `orders_one_pending_per_user_match` を踏むので pending を複数作るときは user / match を分ける、Enum キャストのモデルで CHECK を検証するときは `DB::table()->insert` を使う | 1 | 2026-10-11 | 候補 |
+| 定義修正 | verifier.md に「`scripts/check.sh` は 120 秒を超えるので、Bash の timeout を 600000 にしてフォアグラウンドで実行する」を足す案。バックグラウンドに回した verifier が報告を返さずに終了した（販売フェーズのステップ 2） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | implementer.md の Feature テストの定石に「`BuildsSaleFixture` のブロックコード（M1 等）は `StadiumSeeder` と衝突する。DatabaseSeeder を使うテストは fixture を使うクラスと分ける」を足す案 | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |
