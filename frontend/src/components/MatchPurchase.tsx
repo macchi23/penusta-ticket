@@ -24,7 +24,7 @@ import SeatMapView from "@/components/SeatMapView";
 import SeatGrid from "@/components/SeatGrid";
 import UnreservedPicker from "@/components/UnreservedPicker";
 import CartSummary from "@/components/CartSummary";
-import SaleBanner from "@/components/SaleBanner";
+import SaleBanner, { seatsHiddenReason } from "@/components/SaleBanner";
 
 let tempId = 0;
 
@@ -126,6 +126,7 @@ export default function MatchPurchase({
   cartError,
   pricesError,
   seatsError,
+  seatsHidden,
 }: {
   match: Match;
   seatmap: SeatMap;
@@ -136,6 +137,7 @@ export default function MatchPurchase({
   cartError: boolean;
   pricesError: boolean;
   seatsError: boolean;
+  seatsHidden: boolean;
 }) {
   const router = useRouter();
   const [optimistic, applyOptimistic] = useOptimistic(cart, reducer);
@@ -260,6 +262,11 @@ export default function MatchPurchase({
                 <h2 className="mb-2 text-lg font-bold">
                   {selectedBlock.stand} {selectedBlock.code}
                 </h2>
+                {seatsHidden && (
+                  <p data-testid="seats-hidden" className="mb-2 text-sm text-gray-600 dark:text-gray-300">
+                    {seatsHiddenReason(match.sale_phases, optimistic?.sale ?? null, optimistic?.server_time ?? null, { noUser, cartError })}
+                  </p>
+                )}
                 {selectedBlock.seating_type === "unreserved" ? (
                   <UnreservedPicker
                     block={selectedBlock}
@@ -267,14 +274,14 @@ export default function MatchPurchase({
                     items={items}
                     maxItems={maxItems}
                     disabled={locked}
-                    reduceOnly={addBlocked}
+                    reduceOnly={addBlocked || seatsHidden}
                     onApply={(quantities) =>
                       run({ type: "setBlock", block: selectedBlock, quantities, prices }, () =>
                         setUnreservedQuantities(match.id, selectedBlock.id, quantities),
                       )
                     }
                   />
-                ) : seatsError ? (
+                ) : seatsHidden ? null : seatsError ? (
                   <p className="text-sm text-red-700">席一覧を取得できません</p>
                 ) : blockSeats ? (
                   <SeatGrid

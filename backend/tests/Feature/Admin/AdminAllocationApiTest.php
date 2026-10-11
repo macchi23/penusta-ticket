@@ -178,7 +178,8 @@ class AdminAllocationApiTest extends TestCase
         $this->assertSame([$changeSetId], $rows->pluck('change_set_id')->unique()->all());
         $this->assertSame([$this->admin->id], $rows->pluck('changed_by')->unique()->all());
 
-        $seatmap = collect($this->getJson("/api/matches/{$this->match->id}/seatmap")->assertOk()->json('blocks'))->keyBy('id');
+        $this->app['auth']->forgetGuards();
+        $seatmap = collect($this->getJson("/api/matches/{$this->match->id}/seatmap", $this->as($this->alice))->assertOk()->json('blocks'))->keyBy('id');
         $this->assertSame('buffer', $seatmap[$this->free->id]['allocation']);
         $this->assertSame(0, $seatmap[$this->free->id]['available']);
         $this->assertSame('closed', $seatmap[$this->other->id]['allocation']);

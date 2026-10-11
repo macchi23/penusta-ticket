@@ -7,7 +7,7 @@ type Block = {
   code: string;
   seating_type: 'reserved' | 'unreserved';
   allocation: string;
-  available: number;
+  available: number | null;
 };
 type SeatStatus = 'available' | 'held' | 'sold';
 type BlockSeats = { rows: { row: string; seats: { id: number; number: number; status: SeatStatus }[] }[] };
@@ -53,26 +53,34 @@ export async function pickOnSaleMatch(): Promise<number> {
   return m.id;
 }
 
+// 席・残数は一般販売中の試合ならログイン済みの誰にでも見える（未ログインには見えない）。閲覧用に customer を 1 人使う
+async function viewerId(): Promise<number> {
+  const { data } = await getJson<{ data: { id: number; role: string }[] }>(undefined, '/api/demo/users?limit=200');
+  const u = data.filter((x) => x.role === 'customer').slice(-1)[0];
+  if (!u) throw new Error('customer のデモユーザーがいない');
+  return u.id;
+}
+
 export async function pickReservedBlock(matchId: number): Promise<number> {
-  const { blocks } = await getJson<{ blocks: Block[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const { blocks } = await getJson<{ blocks: Block[] }>(await viewerId(), `/api/matches/${matchId}/seatmap`);
   const b = blocks
-    .filter((x) => x.seating_type === 'reserved' && (x.allocation === 'home' || x.allocation === 'away') && x.available > 0)
-    .sort((a, b) => b.available - a.available)[0];
+    .filter((x) => x.seating_type === 'reserved' && (x.allocation === 'home' || x.allocation === 'away') && x.available !== null && x.available > 0)
+    .sort((a, b) => (b.available ?? 0) - (a.available ?? 0))[0];
   if (!b) throw new Error('空きのある指定席ブロックがない');
   return b.id;
 }
 
 export async function pickUnreservedBlock(matchId: number): Promise<number> {
-  const { blocks } = await getJson<{ blocks: Block[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const { blocks } = await getJson<{ blocks: Block[] }>(await viewerId(), `/api/matches/${matchId}/seatmap`);
   const b = blocks
-    .filter((x) => x.seating_type === 'unreserved' && (x.allocation === 'home' || x.allocation === 'away') && x.available >= 3)
-    .sort((a, b) => b.available - a.available)[0];
+    .filter((x) => x.seating_type === 'unreserved' && (x.allocation === 'home' || x.allocation === 'away') && x.available !== null && x.available >= 3)
+    .sort((a, b) => (b.available ?? 0) - (a.available ?? 0))[0];
   if (!b) throw new Error('残席 3 以上の自由席ブロックがない');
   return b.id;
 }
 
 export async function getBlockSeatCategory(matchId: number, blockId: number): Promise<string> {
-  const { blocks } = await getJson<{ blocks: (Block & { seat_category: string })[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const { blocks } = await getJson<{ blocks: (Block & { seat_category: string })[] }>(await viewerId(), `/api/matches/${matchId}/seatmap`);
   const b = blocks.find((x) => x.id === blockId);
   if (!b) throw new Error(`ブロック ${blockId} が見つからない`);
   return b.seat_category;
@@ -93,7 +101,7 @@ export async function pickAvailableSeat(
   matchId: number,
   blockId: number,
 ): Promise<{ id: number; row: string; number: number }> {
-  const { rows } = await getJson<BlockSeats>(undefined, `/api/matches/${matchId}/blocks/${blockId}/seats`);
+  const { rows } = await getJson<BlockSeats>(await viewerId(), `/api/matches/${matchId}/blocks/${blockId}/seats`);
   for (const r of rows) {
     const s = r.seats.find((x) => x.status === 'available');
     if (s) return { id: s.id, row: r.row, number: s.number };
@@ -142,7 +150,7 @@ export async function clearCart(userId: number, matchId: number): Promise<void> 
 }
 
 export async function seatStatus(matchId: number, blockId: number, seatId: number): Promise<SeatStatus> {
-  const { rows } = await getJson<BlockSeats>(undefined, `/api/matches/${matchId}/blocks/${blockId}/seats`);
+  const { rows } = await getJson<BlockSeats>(await viewerId(), `/api/matches/${matchId}/blocks/${blockId}/seats`);
   for (const r of rows) {
     const s = r.seats.find((x) => x.id === seatId);
     if (s) return s.status;
@@ -237,4 +245,23 @@ export async function setUnreservedQuantity(
   } finally {
     await api.dispose();
   }
+}
+
+// 未ログインで席を隠せる試合。販売中でない、または会員限定のフェーズの試合を優先し、なければ一般販売中の試合（未ログインは常に隠れる）
+export async function pickHiddenMatch(): Promise<number> {
+  const { data } = await getJson<{
+    data: { id: number; status: string; sale_phases: { eligibility: string | null; starts_at: string; ends_at: string }[] }[];
+  }>(undefined, '/api/matches');
+  const now = Date.now();
+  const current = (m: (typeof data)[number]) => m.sale_phases.find((p) => Date.parse(p.starts_at) <= now && now < Date.parse(p.ends_at));
+  const m = data.find((x) => x.status === 'on_sale' && (!current(x) || current(x)!.eligibility !== null)) ?? data.find((x) => x.status === 'on_sale' && current(x));
+  if (!m) throw new Error('on_sale の試合がない');
+  return m.id;
+}
+
+export async function pickBlockOf(matchId: number, type: 'reserved' | 'unreserved'): Promise<number> {
+  const { blocks } = await getJson<{ blocks: Block[] }>(undefined, `/api/matches/${matchId}/seatmap`);
+  const b = blocks.find((x) => x.seating_type === type && (x.allocation === 'home' || x.allocation === 'away'));
+  if (!b) throw new Error(`${type} のブロックがない`);
+  return b.id;
 }

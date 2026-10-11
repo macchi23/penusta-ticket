@@ -7,6 +7,7 @@ import { ALLOCATION_COLORS, ALLOCATION_LABELS, ALLOCATIONS, isSellable } from "@
 function blockOpacity(b: BlockInfo): number {
   if (b.allocation === "buffer" || b.allocation === "closed") return 0.5;
   if (b.capacity === 0) return 0.3;
+  if (b.available === null) return 0.65; // 残数を伏せるときは割当の色だけで塗る
   const ratio = b.available / b.capacity;
   return 0.35 + 0.65 * ratio; // 完売に近いほど薄く
 }
@@ -67,7 +68,9 @@ export default function SeatMapView({
               {ALLOCATION_LABELS[a]}
             </span>
           ))}
-          <span className="text-gray-500">※ 色が薄いほど残席わずか</span>
+          {seatmap.blocks.every((b) => b.available !== null) && (
+            <span className="text-gray-500">※ 色が薄いほど残席わずか</span>
+          )}
         </div>
       </div>
 

@@ -50,7 +50,12 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
     foundBlock && (foundBlock.allocation === "home" || foundBlock.allocation === "away") ? foundBlock : null;
   const reservedSelected = selectedBlock?.seating_type === "reserved";
   const blockSeats = reservedSelected && seatsRes?.ok ? seatsRes.data : null;
-  const seatsError = reservedSelected && seatsRes !== null && !seatsRes.ok && seatsRes.status !== 404;
+  // 席を見せない状態（残数が null、または座席 API が 403）。通信エラーとは区別する
+  const seatsHidden =
+    selectedBlock !== null &&
+    (selectedBlock.available === null || (reservedSelected && seatsRes !== null && !seatsRes.ok && seatsRes.status === 403));
+  const seatsError =
+    reservedSelected && !seatsHidden && seatsRes !== null && !seatsRes.ok && seatsRes.status !== 404;
 
   const { match } = seatmap;
   const kickoff = new Date(match.kickoff_at).toLocaleString("ja-JP", {
@@ -86,6 +91,7 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
         cartError={cartError}
         pricesError={pricesError}
         seatsError={seatsError}
+        seatsHidden={seatsHidden}
         selectedBlock={selectedBlock}
         blockSeats={blockSeats}
       />

@@ -44,7 +44,7 @@
 - [x] ハコ: docker 環境 + スキーマ + シード + 座席図表示（初回構築）
 - [x] 購入フロー（カート/仮押さえ/決済モック）— 骨格。DB 方式のみ。Redis 版との比較は未着手
 - [x] 管理画面: 割当・緩衝帯エディタ（2026-10-06）。座席図の上で塗って保存。チケットのあるブロックは変更拒否、購入側と allocation 行のロックで直列化、変更は監査表へ（dev-notes.md「割当エディタ」）
-- [x] 販売フェーズ（FC 先行/一般）と資格判定、年パス固定席の発行（2026-10-11）。`sale_phases` は試合ごとの行（[starts_at, ends_at)）、`SaleGate` がフェーズと会員資格（JST 暦日）を hold 時と checkout 時に判定し、checkout で `orders.sale_phase_id` を記録。販売方式は `SaleMethodRegistry` で method から引く。年パス先行は作らない（年パスは開幕前だけ販売・年間有効・途中解約なし）。固定席は `season_pass_seats` に持ち、試合ごとに paid・0 円のチケットとして発行して「販売済み」にする（`SeasonPassIssuer`）
+- [x] 販売フェーズ（FC 先行/一般）と資格判定、年パス固定席の発行（2026-10-11）。`sale_phases` は試合ごとの行（[starts_at, ends_at)）、`SaleGate` がフェーズと会員資格（JST 暦日）を hold 時と checkout 時に判定し、checkout で `orders.sale_phase_id` を記録。販売方式は `SaleMethodRegistry` で method から引く。年パス先行は作らない（年パスは開幕前だけ販売・年間有効・途中解約なし）。固定席は `season_pass_seats` に持ち、試合ごとに paid・0 円のチケットとして発行して「販売済み」にする（`SeasonPassIssuer`）。席割りと残席は購入できる人（販売中・資格あり・ログイン済み）にだけ返し、それ以外はブロック分けだけ（座席 API は 403 `seats_hidden`、seatmap の available は null）
 - [ ] リセール（通常販売とは別経路）。来場できない試合の券を出品する。方針:
   - 出品はチケット 1 枚ずつ、そのチケットの画面から。年パスの発行分と通常購入（FC 先行・一般）の券が対象。解約したい年パス会員は残り全試合を 1 枚ずつ出品する
   - 元のチケットを `resold` にし、買い手に新しいチケットと order（kind = resale）を作る。出品行を FOR UPDATE でロックし、仮押さえなしで即時確定。`SaleGate` とは別の `ResaleService`

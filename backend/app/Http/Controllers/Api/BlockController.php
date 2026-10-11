@@ -3,16 +3,21 @@
 namespace App\Http\Controllers\Api;
 
 use App\Enums\TicketStatus;
+use App\Exceptions\PurchaseException;
 use App\Http\Controllers\Controller;
 use App\Models\Block;
 use App\Models\FootballMatch;
 use App\Models\Ticket;
+use App\Services\Purchase\SaleGate;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
 
 class BlockController extends Controller
 {
-    public function seats(FootballMatch $match, Block $block): JsonResponse
+    public function __construct(private SaleGate $gate) {}
+
+    public function seats(Request $request, FootballMatch $match, Block $block): JsonResponse
     {
         if ($block->seating_type !== 'reserved') {
             abort(404);
@@ -24,6 +29,11 @@ class BlockController extends Controller
         }
 
         $now = CarbonImmutable::now();
+
+        // 購入できない人には席ごとの状態を見せない（ブロック分けだけ見える）
+        if (! $this->gate->canViewSeats(auth('demo')->user(), $match, $now)) {
+            throw PurchaseException::seatsHidden();
+        }
 
         $block->load('stand');
 

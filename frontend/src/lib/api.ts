@@ -37,7 +37,8 @@ export type BlockInfo = {
   seat_category: string;
   allocation: Allocation;
   capacity: number;
-  available: number;
+  // 購入できない人（未ログイン・発売前・非対象・終了後）には null。ブロックの割当の色だけ見せる
+  available: number | null;
   geometry: { x: number; y: number; w: number; h: number };
 };
 
@@ -137,7 +138,7 @@ export type ApiErrorCode =
   | "seat_unavailable" | "sold_out" | "cart_expired"
   | "cart_limit_reached" | "not_on_sale" | "price_not_found" | "cart_empty"
   | "payment_declined" | "user_required" | "validation_failed" | "unknown"
-  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden" | "not_eligible";
+  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden" | "not_eligible" | "seats_hidden";
 export type ApiError = { code: ApiErrorCode; message: string; details?: { blocks?: AllocationConflict[] } };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export type SeatDisplayStatus = SeatStatus | "mine";

@@ -7,6 +7,7 @@ use App\Models\FootballMatch;
 use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
 use App\Models\Membership;
+use App\Models\SalePhase;
 use App\Models\Season;
 use App\Models\Seat;
 use App\Models\SeatCategory;
@@ -29,6 +30,8 @@ class PurchaseFoundationTest extends TestCase
     private FootballMatch $match;
 
     private Block $block;
+
+    private ?User $viewer = null;
 
     /** @var array<int, Seat> */
     private array $seats = [];
@@ -72,6 +75,14 @@ class PurchaseFoundationTest extends TestCase
         foreach (range(1, 5) as $n) {
             $this->seats[$n] = Seat::create(['block_id' => $this->block->id, 'row_label' => 'A', 'number' => $n]);
         }
+
+        // 席・残数は販売中で資格のある利用者にしか見えない。テスト中の時刻移動を覆う一般販売を置く
+        config(['ticketing.demo_auth_enabled' => true]);
+        $this->match->salePhases()->delete();
+        SalePhase::create([
+            'match_id' => $this->match->id, 'kind' => 'general', 'eligibility' => null,
+            'starts_at' => Carbon::parse('2000-01-01 00:00:00', 'UTC'), 'ends_at' => Carbon::parse('2030-03-01 10:00:00', 'UTC'),
+        ]);
     }
 
     public function test_inventory_counts_only_paid_and_unexpired_held(): void
@@ -224,16 +235,23 @@ class PurchaseFoundationTest extends TestCase
         ]);
     }
 
+    private function viewerHeaders(): array
+    {
+        $this->viewer ??= User::create(['name' => 'Viewer', 'email' => 'viewer@example.com', 'password' => 'x']);
+
+        return ['X-Demo-User-Id' => (string) $this->viewer->id];
+    }
+
     private function assertSeatmapAvailable(int $expected): void
     {
-        $blocks = $this->getJson("/api/matches/{$this->match->id}/seatmap")->assertOk()->json('blocks');
+        $blocks = $this->getJson("/api/matches/{$this->match->id}/seatmap", $this->viewerHeaders())->assertOk()->json('blocks');
         $this->assertSame($expected, $blocks[0]['available']);
     }
 
     /** @param array<int, string> $expected seat number => status */
     private function assertSeatStatuses(array $expected): void
     {
-        $rows = $this->getJson("/api/matches/{$this->match->id}/blocks/{$this->block->id}/seats")
+        $rows = $this->getJson("/api/matches/{$this->match->id}/blocks/{$this->block->id}/seats", $this->viewerHeaders())
             ->assertOk()->json('rows');
         $actual = [];
         foreach ($rows[0]['seats'] as $s) {

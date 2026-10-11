@@ -15,7 +15,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | code-reviewer / security-reviewer の販売整合性チェックに「同じトランザクション内で解放してから取り直す形が仮押さえの延長に化けていないか」を足す案（B4 で両レビューが検出） | 1 | 2026-10-03 | 候補 |
 | 定義修正 | code-reviewer.md の「`now` をロック取得後に取っているか」は `CheckoutService` だけが守っていて `CartService` 系と食い違う。定義を「新規・変更する経路では」と限定するか、実装を揃える | 1 | 2026-10-04 | 解消（実装を揃えた） |
 | 定義修正 | Explore の返却が「答えを先頭に 1〜3 行」にならず、前置き（「調査完了しました」）+ 見出しと表になった。問いが複数のときの形を定義に書く案 | 2 | 2026-10-03 | 採用 |
-| 定義修正 | implementer.md に Feature テストの定石を足す案: demo guard でユーザーを切り替えるときは `auth()->forgetGuards()`、jsonb の payload 比較は `assertEquals`（キー順が保存されない） | 1 | 2026-10-03 | 候補 |
+| 定義修正 | implementer.md に Feature テストの定石を足す案: demo guard でユーザーを切り替えるときは `auth()->forgetGuards()`、jsonb の payload 比較は `assertEquals`（キー順が保存されない）。2026-10-11: AdminAllocationApiTest の公開 seatmap の検証が、直前のリクエストの admin をキャッシュしたまま通っていた（レビューで検出） | 2 | 2026-10-11 | 候補 |
 | 定義修正 | implementer.md に「複数行の置換は BSD `sed -i` でなく Edit を使う」を足す案（macOS で失敗した。DuckDB 環境の実装、合成データ再生成の検証でも再発） | 3 | 2026-10-04 | 採用 |
 | 定義修正 | E2E の定石を implementer.md / code-reviewer.md に足す案: 楽観更新のある UI では「楽観更新で出た／消えた要素」で完了を待たない（hold は対処済みで release で漏れた）。Next の route announcer も `role="alert"` なので alert は文言で絞る | 1 | 2026-10-03 | 候補 |
 | 定義修正 | implementer / code-reviewer が `path` を絶対パスで返した。「リポジトリ相対」と明記する案 | 1 | 2026-10-02 | 候補 |
@@ -63,4 +63,5 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | 「DB の値を読む」仕様のテスト観点をブリーフに入れる: 既定値（テンプレート）と同じデータでしか走らないと、定数のままの実装と区別できない。値をずらしたデータで結果が変わることを確かめる（生成器の sale_phases、レビューで検出） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 生成器を変えるブリーフの前に、関連する不変条件のテスト（UnsoldMatchTest の「未販売の試合に何も無い」など）を grep して前提に書く | 1 | 2026-10-11 | 候補 |
 | 定義修正 | E2E を「その時のデータに合わせて選ぶ」形に直すとき、初期値によって検証が空振りしないか（同じ値への変更、元が buffer のブロックを buffer に塗る）を完了条件に入れる。haiku の修正で 2 か所残り、メインが直した | 1 | 2026-10-11 | 候補 |
+| 定義修正 | 閲覧権限を足すブリーフに、未ログインで API を叩いている既存テスト・e2e ヘルパーを grep して影響範囲として書く（PurchaseFoundationTest、SeasonPassIssuerTest、e2e/lib/api.ts が壊れた） | 1 | 2026-10-12 | 候補 |
 | 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |

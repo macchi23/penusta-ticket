@@ -32,6 +32,24 @@ function describe(phases: SalePhase[], sale: CartResponse["sale"], serverTime: s
   return "販売終了";
 }
 
+// 席を見せられない理由。帯の文言と矛盾しないよう describe と同じ判定で選ぶ
+export function seatsHiddenReason(
+  phases: SalePhase[],
+  sale: CartResponse["sale"] | null,
+  serverTime: string | null,
+  state: { noUser: boolean; cartError: boolean },
+): string {
+  if (state.noUser) return "席の状況の表示にはログイン（ユーザー選択）が必要です";
+  if (state.cartError || sale === null || serverTime === null) return "販売状況を取得できませんでした";
+  if (sale.current_phase_id !== null) {
+    if (sale.eligible) return "販売状況が更新されました。再読み込みしてください";
+    return "FC 会員先行販売中は会員のみ席を表示できます";
+  }
+  const now = Date.parse(serverTime);
+  if (phases.some((p) => Date.parse(p.starts_at) > now)) return "発売前のため席は選べません";
+  return phases.length === 0 ? "現在販売していないため席は選べません" : "販売は終了しました";
+}
+
 export default function SaleBanner({
   phases,
   sale,

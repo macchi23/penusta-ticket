@@ -48,9 +48,11 @@ export default function UnreservedPicker({
       <p>
         {block.stand} {block.code}（自由席）
       </p>
-      <p>
-        残席 {block.available} / {block.capacity}
-      </p>
+      {block.available !== null && (
+        <p>
+          残席 {block.available} / {block.capacity}
+        </p>
+      )}
       <p>このブロックで確保中: {inBlock.length} 枚</p>
       <ul className="space-y-1">
         {rows.map((r) => {
@@ -59,7 +61,7 @@ export default function UnreservedPicker({
             0,
             Math.min(
               maxItems - otherBlocks - (total - value(id)),
-              inBlock.length + block.available - (total - value(id)),
+              inBlock.length + (block.available ?? 0) - (total - value(id)),
             ),
           );
           const top = reduceOnly ? current(id) : Math.max(max, value(id));

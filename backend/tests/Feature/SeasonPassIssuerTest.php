@@ -254,11 +254,12 @@ class SeasonPassIssuerTest extends TestCase
         $this->pass(null, $this->free, $this->bob);
         $this->issue();
 
-        $blocks = collect($this->getJson("/api/matches/{$this->match->id}/seatmap")->assertOk()->json('blocks'))->keyBy('id');
+        $h = ['X-Demo-User-Id' => (string) $this->alice->id];
+        $blocks = collect($this->getJson("/api/matches/{$this->match->id}/seatmap", $h)->assertOk()->json('blocks'))->keyBy('id');
         $this->assertSame(9, $blocks[$this->reserved->id]['available']);
         $this->assertSame(1, $blocks[$this->free->id]['available']);
 
-        $rows = $this->getJson("/api/matches/{$this->match->id}/blocks/{$this->reserved->id}/seats")->assertOk()->json('rows');
+        $rows = $this->getJson("/api/matches/{$this->match->id}/blocks/{$this->reserved->id}/seats", $h)->assertOk()->json('rows');
         $status = collect($rows)->pluck('seats')->flatten(1)->pluck('status', 'id');
         $this->assertSame('sold', $status[$this->seats[1]->id]);
         $this->assertSame('available', $status[$this->seats[2]->id]);

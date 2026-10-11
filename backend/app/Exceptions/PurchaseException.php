@@ -55,6 +55,11 @@ class PurchaseException extends Exception
         return new self('not_eligible', $message, 422);
     }
 
+    public static function seatsHidden(): self
+    {
+        return new self('seats_hidden', '現在この試合の席は表示できません。', 403);
+    }
+
     public static function priceNotFound(): self
     {
         return new self('price_not_found', '価格が設定されていません。', 422);
