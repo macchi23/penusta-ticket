@@ -50,6 +50,11 @@ class PurchaseException extends Exception
         return new self('not_on_sale', $message, 422);
     }
 
+    public static function notEligible(string $message = 'この販売期間は対象の会員のみ購入できます。'): self
+    {
+        return new self('not_eligible', $message, 422);
+    }
+
     public static function priceNotFound(): self
     {
         return new self('price_not_found', '価格が設定されていません。', 422);

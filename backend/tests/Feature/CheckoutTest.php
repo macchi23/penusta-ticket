@@ -9,6 +9,7 @@ use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\SalePhase;
 use App\Models\Season;
 use App\Models\Seat;
 use App\Models\SeatCategory;
@@ -63,6 +64,10 @@ class CheckoutTest extends TestCase
             'season_id' => $season->id, 'home_team_id' => $home->id, 'away_team_id' => $away->id,
             'stadium_id' => $stadium->id, 'kickoff_at' => Carbon::parse('2030-03-01 10:00:00', 'UTC'),
             'status' => 'on_sale', 'section_label' => 'A',
+        ]);
+        SalePhase::create([
+            'match_id' => $this->match->id, 'kind' => 'general', 'eligibility' => null,
+            'starts_at' => Carbon::parse('2026-05-01 00:00:00', 'UTC'), 'ends_at' => $this->match->kickoff_at,
         ]);
 
         $this->reserved = $this->makeBlock($stand, $category, 'M1', 'reserved', 10, 'home');

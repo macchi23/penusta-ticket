@@ -19,7 +19,9 @@ use Illuminate\Support\Facades\DB;
 class CheckoutService
 {
     public function __construct(
-        private FirstComeSaleMethod $saleMethod,
+        private SaleGate $gate,
+        private SaleMethodRegistry $methods,
+        private SaleConditions $conditions,
         private DbHoldExpiry $holdExpiry,
         private MockPaymentGateway $gateway,
         private AllocationLocks $locks,
@@ -86,6 +88,9 @@ class CheckoutService
             }
 
             $match = $order->match;
+            // 資格は checkout 時の規則で判定する（hold 時のフェーズは問わない）
+            $phase = $this->gate->open($user, $match, $now);
+            $this->methods->for($phase->method);
             $items = OrderItem::with(['ticket.block', 'ticketType'])
                 ->where('order_id', $order->id)
                 ->whereIn('ticket_id', $ticketIds)
@@ -95,8 +100,8 @@ class CheckoutService
             foreach ($items as $item) {
                 $block = $item->ticket->block;
                 $allocation = $allocations[$block->id] ?? 'closed';
-                $this->saleMethod->assertSellable($match, $allocation);
-                $this->saleMethod->assertTicketType($item->ticketType);
+                $this->conditions->assertSellable($match, $allocation);
+                $this->conditions->assertTicketType($item->ticketType);
 
                 $price = MatchPrice::where('match_id', $match->id)
                     ->where('seat_category_id', $block->seat_category_id)
@@ -125,6 +130,7 @@ class CheckoutService
             $order->total = $total;
             $order->expires_at = null;
             $order->ordered_at = $now;
+            $order->sale_phase_id = $phase->id;
             $order->save();
 
             return new CheckoutResult($order, true, $ticketIds->count(), $now);

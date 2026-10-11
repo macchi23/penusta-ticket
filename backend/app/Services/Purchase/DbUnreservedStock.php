@@ -13,7 +13,7 @@ use Illuminate\Support\Str;
 
 class DbUnreservedStock
 {
-    public function __construct(private FirstComeSaleMethod $saleMethod, private AllocationLocks $locks) {}
+    public function __construct(private SaleConditions $conditions, private AllocationLocks $locks) {}
 
     /**
      * 自由席を 1 枚仮押さえする。呼び出し側でカート行をロック済みであること
@@ -40,7 +40,7 @@ class DbUnreservedStock
 
         // addItem などが同じ行を先にロックしていても、同じモード（FOR UPDATE）なので問題ない
         $allocation = $this->locks->forPurchase($match->id, [$block])[$block->id];
-        $this->saleMethod->assertAllocationSellable($allocation);
+        $this->conditions->assertAllocationSellable($allocation);
 
         $consumed = Ticket::where('match_id', $match->id)
             ->where('block_id', $block->id)

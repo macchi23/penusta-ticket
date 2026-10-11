@@ -23,7 +23,9 @@ use Illuminate\Support\Str;
 class CartService
 {
     public function __construct(
-        private FirstComeSaleMethod $saleMethod,
+        private SaleGate $gate,
+        private SaleMethodRegistry $methods,
+        private SaleConditions $conditions,
         private DbUnreservedStock $unreservedStock,
         private DbHoldExpiry $holdExpiry,
         private AllocationLocks $locks,
@@ -82,12 +84,16 @@ class CartService
             }
 
             // チケットを作る前に allocation 行をロックし、ロックした読み取りの値で判定する
+            $phase = $this->gate->open($user, $match, $now);
+            $saleMethod = $this->methods->for($phase->method);
             $allocation = $this->locks->forPurchase($match->id, [$block])[$block->id];
             // $now は取り直さない（checkout はロック後に取る）。カート期限の判定は orders ロック直後の $now で
             // 済んでおり、ここで進めると期限切れ held を残したまま expires_at だけ延長しうる。
 
             $heldCount = $this->liveTickets($cart, $now)->where('status', TicketStatus::Held->value)->count();
-            $this->saleMethod->assertCanHold($user, $match, $block, $allocation, $heldCount, $type);
+            $this->conditions->assertSellable($match, $allocation);
+            $saleMethod->assertCanHold($user, $match, $block, $heldCount);
+            $this->conditions->assertTicketType($type);
             $price = $this->priceFor($match, $block, $type);
 
             if ($heldCount === 0) {
@@ -126,12 +132,12 @@ class CartService
             $allocation = MatchBlockAllocation::where('match_id', $match->id)
                 ->where('block_id', $block->id)
                 ->value('allocation') ?? 'closed';
-            $this->saleMethod->assertSellable($match, $allocation);
+            $this->conditions->assertSellable($match, $allocation);
 
             $wanted = [];
             foreach ($quantities as $row) {
                 $type = TicketType::findOrFail($row['ticket_type_id']);
-                $this->saleMethod->assertTicketType($type);
+                $this->conditions->assertTicketType($type);
                 $wanted[] = [$type, (int) $row['quantity'], $this->priceFor($match, $block, $type)];
             }
 
@@ -172,6 +178,8 @@ class CartService
 
             [$heldBefore, $drops, $adds, $addTotal] = $plan();
             if ($addTotal > 0) {
+                // 増える分があるときだけ資格を判定する（減らすだけなら資格外でもカートを片付けられる）
+                $this->methods->for($this->gate->open($user, $match, $now)->method);
                 $this->locks->forPurchase($match->id, [$block]);
                 // $now は取り直さない（addItem と同じ理由）
             }
@@ -233,8 +241,9 @@ class CartService
             $allocation = MatchBlockAllocation::where('match_id', $match->id)
                 ->where('block_id', $block->id)
                 ->value('allocation') ?? 'closed';
-            $this->saleMethod->assertSellable($match, $allocation);
-            $this->saleMethod->assertTicketType($type);
+            $this->methods->for($this->gate->open($user, $match, $now)->method);
+            $this->conditions->assertSellable($match, $allocation);
+            $this->conditions->assertTicketType($type);
 
             $item->ticket_type_id = $type->id;
             $item->price = $this->priceFor($match, $block, $type);
