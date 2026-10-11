@@ -11,6 +11,7 @@ export default function UnreservedPicker({
   items,
   maxItems,
   disabled,
+  reduceOnly,
   onApply,
 }: {
   block: BlockInfo;
@@ -18,6 +19,8 @@ export default function UnreservedPicker({
   items: OrderItem[];
   maxItems: number;
   disabled: boolean;
+  // 販売期間外 / 非対象のとき: 枚数を減らすことだけできる
+  reduceOnly: boolean;
   onApply: (quantities: UnreservedQuantity[]) => void;
 }) {
   const rows = prices.filter(
@@ -59,7 +62,7 @@ export default function UnreservedPicker({
               inBlock.length + block.available - (total - value(id)),
             ),
           );
-          const top = Math.max(max, value(id));
+          const top = reduceOnly ? current(id) : Math.max(max, value(id));
           return (
             <li key={id} className="flex items-center gap-2">
               <span className="min-w-0 flex-1">

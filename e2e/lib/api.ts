@@ -35,10 +35,21 @@ async function getJson<T>(userId: number | undefined, path: string): Promise<T> 
   }
 }
 
+// 一般販売フェーズの最中にある on_sale の試合（FC 先行中だと会員でないデモユーザーが買えない）
+// 実行中にフェーズが切り替わらないよう、現フェーズの終了まで 1 時間以上ある試合に絞る
+const HOUR = 3600_000;
+
 export async function pickOnSaleMatch(): Promise<number> {
-  const { data } = await getJson<{ data: { id: number; status: string }[] }>(undefined, '/api/matches');
-  const m = data.find((x) => x.status === 'on_sale');
-  if (!m) throw new Error('on_sale の試合がない');
+  const { data } = await getJson<{
+    data: { id: number; status: string; sale_phases: { kind: string; starts_at: string; ends_at: string }[] }[];
+  }>(undefined, '/api/matches');
+  const now = Date.now();
+  const m = data.find(
+    (x) =>
+      x.status === 'on_sale' &&
+      x.sale_phases.some((p) => p.kind === 'general' && Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at)),
+  );
+  if (!m) throw new Error('一般販売中の on_sale の試合がない');
   return m.id;
 }
 
@@ -93,6 +104,27 @@ export async function pickAvailableSeat(
 export async function pickUsers(n: number): Promise<number[]> {
   const { data } = await getJson<{ data: { id: number }[] }>(undefined, '/api/demo/users?limit=200');
   return data.slice(-n).map((u) => u.id);
+}
+
+// 今その試合を買える一般ユーザー。販売中のフェーズが会員限定なら、その会員資格を持つユーザーを選ぶ
+export async function pickCustomerFor(matchId: number): Promise<number> {
+  const { data: matches } = await getJson<{
+    data: { id: number; sale_phases: { eligibility: string | null; starts_at: string; ends_at: string }[] }[];
+  }>(undefined, '/api/matches');
+  const now = Date.now();
+  const phase = matches
+    .find((m) => m.id === matchId)
+    ?.sale_phases.find((p) => Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at));
+  if (!phase) throw new Error(`試合 ${matchId} は販売中ではない`);
+  const { data } = await getJson<{ data: { id: number; role: string; memberships: string[] }[] }>(
+    undefined,
+    '/api/demo/users?limit=200',
+  );
+  const u = data
+    .filter((x) => x.role === 'customer' && (phase.eligibility === null || x.memberships.includes(phase.eligibility)))
+    .slice(-1)[0];
+  if (!u) throw new Error('購入できるデモユーザーがいない');
+  return u.id;
 }
 
 export async function clearCart(userId: number, matchId: number): Promise<void> {
@@ -164,8 +196,14 @@ export async function patchAllocations(
 }
 
 export async function pickEditableUnsoldMatch(adminId: number): Promise<number> {
-  const { data } = await getJson<{ data: { id: number; editable: boolean; status: string }[] }>(adminId, '/api/admin/matches');
-  for (const m of data.filter((x) => x.editable && x.status === 'on_sale')) {
+  const { data } = await getJson<{
+    data: { id: number; editable: boolean; status: string; sale_phases: { starts_at: string; ends_at: string }[] }[];
+  }>(adminId, '/api/admin/matches');
+  const now = Date.now();
+  // 販売フェーズの最中でないと、購入側の操作（仮押さえ）を試せない
+  const selling = (m: (typeof data)[number]) =>
+    m.sale_phases.some((p) => Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at));
+  for (const m of data.filter((x) => x.editable && x.status === 'on_sale' && selling(x))) {
     const { blocks } = await getAdminAllocations(adminId, m.id);
     if (blocks.every((b) => !b.locked)) return m.id;
   }

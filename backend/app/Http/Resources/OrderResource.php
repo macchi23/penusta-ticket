@@ -44,6 +44,7 @@ class OrderResource extends JsonResource
             'id' => $this->id,
             'match_id' => $this->match_id,
             'status' => $this->status->value,
+            'kind' => $this->kind->value,
             'expires_at' => self::time($this->expires_at),
             'ordered_at' => self::time($this->ordered_at),
             'total' => (int) $items->sum('price'),

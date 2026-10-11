@@ -35,6 +35,9 @@ export default function CheckoutForm({
     case "price_not_found":
       message = <>販売条件が変わりました。カートを確認してください。{back}</>;
       break;
+    case "not_eligible":
+      message = <>この販売期間は対象の会員のみ購入できます。{back}</>;
+      break;
     case "payment_declined":
       message = <>決済が承認されませんでした。もう一度お試しください。</>;
       break;

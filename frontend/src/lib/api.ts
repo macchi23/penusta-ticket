@@ -5,6 +5,17 @@ export type Team = {
   color: string;
 };
 
+export type SalePhaseKind = "fanclub_presale" | "general";
+export type MembershipKind = "season_pass" | "fanclub";
+export type SalePhase = {
+  id: number;
+  kind: SalePhaseKind;
+  method: "first_come";
+  eligibility: MembershipKind | null;
+  starts_at: string;
+  ends_at: string;
+};
+
 export type Match = {
   id: number;
   kickoff_at: string;
@@ -13,6 +24,7 @@ export type Match = {
   home_team: Team;
   away_team: Team;
   stadium: string;
+  sale_phases: SalePhase[];
 };
 
 export type Allocation = "home" | "away" | "buffer" | "closed";
@@ -108,18 +120,24 @@ export type Order = {
   id: number;
   match_id: number;
   status: OrderStatus;
+  kind: "purchase" | "season_pass";
   expires_at: string | null;
   ordered_at: string | null;
   total: number;
   items: OrderItem[];
 };
-export type CartResponse = { cart: Order | null; server_time: string; max_items: number };
+export type CartResponse = {
+  cart: Order | null;
+  server_time: string;
+  max_items: number;
+  sale: { current_phase_id: number | null; eligible: boolean };
+};
 export type UnreservedQuantity = { ticket_type_id: number; quantity: number };
 export type ApiErrorCode =
   | "seat_unavailable" | "sold_out" | "cart_expired"
   | "cart_limit_reached" | "not_on_sale" | "price_not_found" | "cart_empty"
   | "payment_declined" | "user_required" | "validation_failed" | "unknown"
-  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden";
+  | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden" | "not_eligible";
 export type ApiError = { code: ApiErrorCode; message: string; details?: { blocks?: AllocationConflict[] } };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export type SeatDisplayStatus = SeatStatus | "mine";

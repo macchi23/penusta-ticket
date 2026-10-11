@@ -29,4 +29,16 @@ class SaleGate
 
         return $phase;
     }
+
+    /**
+     * open() と同じ判定を、例外を投げずに返す。フェーズ外なら [null, false]。
+     *
+     * @return array{0: ?SalePhase, 1: bool}
+     */
+    public function inquire(User $user, FootballMatch $match, CarbonImmutable $now): array
+    {
+        $phase = $this->resolver->current($match, $now);
+
+        return [$phase, $phase !== null && $this->eligibility->isEligible($user, $phase->eligibility, $now)];
+    }
 }

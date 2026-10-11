@@ -13,6 +13,7 @@ use App\Models\Order;
 use App\Services\ActivityRecorder;
 use App\Services\Purchase\CartChange;
 use App\Services\Purchase\CartService;
+use App\Services\Purchase\SaleGate;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -22,13 +23,14 @@ class CartController extends Controller
     public function __construct(
         private CartService $carts,
         private ActivityRecorder $recorder,
+        private SaleGate $gate,
     ) {}
 
     public function show(Request $request, FootballMatch $match): JsonResponse
     {
         $current = $this->carts->current($request->user(), $match);
 
-        return $this->respond($current->cart, $current->now);
+        return $this->respond($request, $match, $current->cart, $current->now);
     }
 
     public function store(StoreCartItemRequest $request, FootballMatch $match): JsonResponse
@@ -44,7 +46,7 @@ class CartController extends Controller
             $this->record('add_to_cart', $request, $match, $change);
         }
 
-        return $this->respond($change->cart, $change->now, $change->changed ? 201 : 200);
+        return $this->respond($request, $match, $change->cart, $change->now, $change->changed ? 201 : 200);
     }
 
     public function setUnreservedQuantities(SetUnreservedQuantitiesRequest $request, FootballMatch $match, Block $block): JsonResponse
@@ -57,14 +59,14 @@ class CartController extends Controller
             $this->record('remove_from_cart', $request, $match, $change, $change->released);
         }
 
-        return $this->respond($change->cart, $change->now);
+        return $this->respond($request, $match, $change->cart, $change->now);
     }
 
     public function update(UpdateCartItemRequest $request, FootballMatch $match, int $item): JsonResponse
     {
         $change = $this->carts->changeTicketType($request->user(), $match, $item, $request->integer('ticket_type_id'));
 
-        return $this->respond($change->cart, $change->now);
+        return $this->respond($request, $match, $change->cart, $change->now);
     }
 
     public function destroy(Request $request, FootballMatch $match, int $item): JsonResponse
@@ -74,7 +76,7 @@ class CartController extends Controller
             $this->record('remove_from_cart', $request, $match, $change);
         }
 
-        return $this->respond($change->cart, $change->now);
+        return $this->respond($request, $match, $change->cart, $change->now);
     }
 
     private function record(string $type, Request $request, FootballMatch $match, CartChange $change, int $quantity = 1): void
@@ -88,12 +90,15 @@ class CartController extends Controller
         ], $change->now);
     }
 
-    private function respond(?Order $cart, CarbonImmutable $now, int $status = 200): JsonResponse
+    private function respond(Request $request, FootballMatch $match, ?Order $cart, CarbonImmutable $now, int $status = 200): JsonResponse
     {
+        [$phase, $eligible] = $this->gate->inquire($request->user(), $match, $now);
+
         return response()->json([
             'cart' => $cart === null ? null : (new OrderResource($cart, $now))->resolve(),
             'server_time' => OrderResource::time($now),
             'max_items' => (int) config('ticketing.max_tickets_per_order'),
+            'sale' => ['current_phase_id' => $phase?->id, 'eligible' => $eligible],
         ], $status);
     }
 }

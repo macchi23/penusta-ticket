@@ -4,7 +4,7 @@ import { refresh } from "next/cache";
 import type { ActionResult, CartResponse, UnreservedQuantity } from "@/lib/api";
 import { apiCall } from "@/lib/server-api";
 
-const REFRESH_ON_ERROR = ["seat_unavailable", "sold_out", "cart_expired", "cart_limit_reached"];
+const REFRESH_ON_ERROR = ["seat_unavailable", "sold_out", "cart_expired", "cart_limit_reached", "not_on_sale", "not_eligible"];
 
 function isId(n: unknown): n is number {
   return typeof n === "number" && Number.isSafeInteger(n) && n > 0;

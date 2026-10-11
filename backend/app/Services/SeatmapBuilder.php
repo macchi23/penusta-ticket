@@ -4,6 +4,7 @@ namespace App\Services;
 
 use App\Models\Block;
 use App\Models\FootballMatch;
+use App\Models\SalePhase;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Collection;
 
@@ -14,7 +15,7 @@ class SeatmapBuilder
 {
     public function formatMatch(FootballMatch $match): array
     {
-        $match->loadMissing(['homeTeam', 'awayTeam', 'stadium']);
+        $match->loadMissing(['homeTeam', 'awayTeam', 'stadium', 'salePhases']);
 
         return [
             'id' => $match->id,
@@ -24,6 +25,14 @@ class SeatmapBuilder
             'stadium' => $match->stadium->name,
             'home_team' => $this->formatTeam($match->homeTeam),
             'away_team' => $this->formatTeam($match->awayTeam),
+            'sale_phases' => $match->salePhases->sortBy('starts_at')->values()->map(fn (SalePhase $p) => [
+                'id' => $p->id,
+                'kind' => $p->kind->value,
+                'method' => $p->method,
+                'eligibility' => $p->eligibility,
+                'starts_at' => Carbon::instance($p->starts_at)->setTimezone('Asia/Tokyo')->toIso8601String(),
+                'ends_at' => Carbon::instance($p->ends_at)->setTimezone('Asia/Tokyo')->toIso8601String(),
+            ])->all(),
         ];
     }
 

@@ -15,6 +15,7 @@ export default function SeatGrid({
   pendingSeatIds,
   atLimit,
   disabled,
+  holdDisabled,
   onHold,
   onRelease,
 }: {
@@ -23,6 +24,8 @@ export default function SeatGrid({
   pendingSeatIds: Set<number>;
   atLimit: boolean;
   disabled: boolean;
+  // 販売期間外 / 非対象のとき: 自分の席の解放だけできる
+  holdDisabled: boolean;
   onHold: (seatId: number, row: string, number: number) => void;
   onRelease: (seatId: number) => void;
 }) {
@@ -41,7 +44,7 @@ export default function SeatGrid({
               const clickable =
                 !disabled &&
                 !pending &&
-                (status === "mine" || (status === "available" && !atLimit));
+                (status === "mine" || (status === "available" && !atLimit && !holdDisabled));
               return (
                 <button
                   key={s.id}

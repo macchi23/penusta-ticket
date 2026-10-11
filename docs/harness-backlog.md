@@ -59,4 +59,5 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | implementer.md の Feature テストの定石に「`BuildsSaleFixture` のブロックコード（M1 等）は `StadiumSeeder` と衝突する。DatabaseSeeder を使うテストは fixture を使うクラスと分ける」を足す案 | 1 | 2026-10-11 | 候補 |
 | hook / check | `PurchaseException` の code（`new self('xxx'`）と `frontend/src/lib/api.ts` の `ApiErrorCode` を突き合わせる。販売フェーズで `not_eligible` を backend に足した時点で api.ts が未更新のまま、初回レビューも見落とした（再レビューで検出。今回はステップ分割で次ステップの予定だった） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 購入まわりのブリーフに「CartTest / CheckoutTest は `BuildsSaleFixture` を使わず自前で試合を作るので、前提データ（フェーズ等）を足したら両方にも足す」を書く。足さずに 44 件落ちた（implementer が自力で対処） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | E2E の定石（implementer.md）に「試合の選び方は販売フェーズの現在状態（会員限定か、ends_at までの余裕）を前提にする」を足す案。日付の経過で未販売の試合が FC 先行に入り、非会員で購入する spec が落ちた | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |

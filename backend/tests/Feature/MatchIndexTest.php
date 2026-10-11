@@ -3,6 +3,7 @@
 namespace Tests\Feature;
 
 use App\Models\FootballMatch;
+use App\Models\SalePhase;
 use App\Models\Season;
 use App\Models\Stadium;
 use App\Models\Team;
@@ -13,6 +14,36 @@ use Tests\TestCase;
 class MatchIndexTest extends TestCase
 {
     use RefreshDatabase;
+
+    public function test_match_includes_sale_phases_sorted_by_starts_at(): void
+    {
+        $match = $this->createMatch(
+            $this->createSeason(),
+            $this->createTeam(),
+            $this->createTeam(),
+            $this->createStadium(),
+            Carbon::parse('2026-03-08 10:00:00', 'UTC')
+        );
+        $general = SalePhase::create([
+            'match_id' => $match->id, 'kind' => 'general', 'eligibility' => null,
+            'starts_at' => Carbon::parse('2026-02-02 00:00:00', 'UTC'), 'ends_at' => Carbon::parse('2026-03-08 10:00:00', 'UTC'),
+        ]);
+        $presale = SalePhase::create([
+            'match_id' => $match->id, 'kind' => 'fanclub_presale', 'eligibility' => 'fanclub',
+            'starts_at' => Carbon::parse('2026-02-01 00:00:00', 'UTC'), 'ends_at' => Carbon::parse('2026-02-02 00:00:00', 'UTC'),
+        ]);
+
+        $phases = $this->get('/api/matches')->assertOk()->json('data.0.sale_phases');
+        $this->assertSame([$presale->id, $general->id], array_column($phases, 'id'));
+        $this->assertSame([
+            'id' => $presale->id, 'kind' => 'fanclub_presale', 'method' => 'first_come', 'eligibility' => 'fanclub',
+            'starts_at' => '2026-02-01T09:00:00+09:00', 'ends_at' => '2026-02-02T09:00:00+09:00',
+        ], $phases[0]);
+        $this->assertNull($phases[1]['eligibility']);
+
+        $this->get("/api/matches/{$match->id}/seatmap")->assertOk()
+            ->assertJsonPath('match.sale_phases.0.id', $presale->id);
+    }
 
     public function test_returns_all_matches_sorted_by_kickoff_at(): void
     {
@@ -68,7 +99,7 @@ class MatchIndexTest extends TestCase
         $data = $response->json('data');
         $match = $data[0];
 
-        $expectedKeys = ['id', 'kickoff_at', 'status', 'section_label', 'stadium', 'home_team', 'away_team'];
+        $expectedKeys = ['id', 'kickoff_at', 'status', 'section_label', 'stadium', 'home_team', 'away_team', 'sale_phases'];
         $actualKeys = array_keys($match);
         sort($expectedKeys);
         sort($actualKeys);

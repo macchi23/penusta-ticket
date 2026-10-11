@@ -9,7 +9,7 @@ const API_ERROR_CODE_MAP: Record<ApiErrorCode, true> = {
   seat_unavailable: true, sold_out: true, cart_expired: true,
   cart_limit_reached: true, not_on_sale: true, price_not_found: true, cart_empty: true,
   payment_declined: true, user_required: true, validation_failed: true, unknown: true,
-  allocation_conflict: true, match_locked: true, allocation_busy: true, busy: true, forbidden: true,
+  allocation_conflict: true, match_locked: true, allocation_busy: true, busy: true, forbidden: true, not_eligible: true,
 };
 const API_ERROR_CODES = Object.keys(API_ERROR_CODE_MAP) as ApiErrorCode[];
 

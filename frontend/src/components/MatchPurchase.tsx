@@ -24,6 +24,7 @@ import SeatMapView from "@/components/SeatMapView";
 import SeatGrid from "@/components/SeatGrid";
 import UnreservedPicker from "@/components/UnreservedPicker";
 import CartSummary from "@/components/CartSummary";
+import SaleBanner from "@/components/SaleBanner";
 
 let tempId = 0;
 
@@ -39,6 +40,7 @@ function reducer(state: CartResponse | null, action: OptimisticAction): CartResp
     id: 0,
     match_id: 0,
     status: "pending" as const,
+    kind: "purchase" as const,
     expires_at: null,
     ordered_at: null,
     total: 0,
@@ -105,6 +107,8 @@ function errorMessage(e: ApiError, maxItems: number): string {
       return "この券種は販売していません";
     case "not_on_sale":
       return "この席は現在販売していません";
+    case "not_eligible":
+      return "この販売期間は対象の会員のみ購入できます";
     case "user_required":
       return "ユーザーを選択してください";
     default:
@@ -148,6 +152,9 @@ export default function MatchPurchase({
   const atLimit = optimistic !== null && items.length >= maxItems;
   const noUser = cart === null;
   const locked = noUser || cartError;
+  // 販売中かつ対象のときだけ席を足せる。解放・枚数を減らす操作は常に可能
+  const sale = optimistic?.sale ?? null;
+  const addBlocked = sale !== null && (sale.current_phase_id === null || !sale.eligible);
 
   function run(
     optimisticAction: OptimisticAction | null,
@@ -203,6 +210,9 @@ export default function MatchPurchase({
           価格を取得できません
         </p>
       )}
+      {optimistic && !cartError && (
+        <SaleBanner phases={match.sale_phases} sale={optimistic.sale} serverTime={optimistic.server_time} />
+      )}
       {noUser && !cartError && (
         <p className="rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
           上のバーでユーザーを選んでください
@@ -226,6 +236,7 @@ export default function MatchPurchase({
               cart={optimistic}
               prices={prices}
               onRelease={release}
+              addBlocked={addBlocked}
               onChangeType={(itemId, ticketTypeId, price) => {
                 if (itemId <= 0) return;
                 const p = prices.find((x) => x.ticket_type.id === ticketTypeId);
@@ -256,6 +267,7 @@ export default function MatchPurchase({
                     items={items}
                     maxItems={maxItems}
                     disabled={locked}
+                    reduceOnly={addBlocked}
                     onApply={(quantities) =>
                       run({ type: "setBlock", block: selectedBlock, quantities, prices }, () =>
                         setUnreservedQuantities(match.id, selectedBlock.id, quantities),
@@ -271,6 +283,7 @@ export default function MatchPurchase({
                     pendingSeatIds={pendingSeatIds}
                     atLimit={atLimit}
                     disabled={locked}
+                    holdDisabled={addBlocked}
                     onHold={(seatId, row, number) =>
                       run(
                         {

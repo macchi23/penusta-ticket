@@ -16,7 +16,7 @@ class MatchController extends Controller
 
     public function index(): JsonResponse
     {
-        $matches = FootballMatch::with(['homeTeam', 'awayTeam', 'stadium'])
+        $matches = FootballMatch::with(['homeTeam', 'awayTeam', 'stadium', 'salePhases'])
             ->orderBy('kickoff_at')
             ->get();
 

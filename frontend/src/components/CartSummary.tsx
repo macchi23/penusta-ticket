@@ -12,12 +12,15 @@ export default function CartSummary({
   prices,
   onRelease,
   onChangeType,
+  addBlocked,
 }: {
   matchId: number;
   cart: CartResponse;
   prices: MatchPrice[];
   onRelease: (itemId: number) => void;
   onChangeType: (itemId: number, ticketTypeId: number, price: number) => void;
+  // 販売期間外 / 非対象のとき: 券種変更は backend が拒否する（外すのは可能）
+  addBlocked: boolean;
 }) {
   const order = cart.cart;
   const items = order?.items ?? [];
@@ -51,7 +54,7 @@ export default function CartSummary({
                 </span>
                 <select
                   value={it.ticket_type.id}
-                  disabled={pending}
+                  disabled={pending || addBlocked}
                   onChange={(e) => {
                     const p = options.find((o) => o.ticket_type.id === Number(e.target.value));
                     if (p) onChangeType(it.id, p.ticket_type.id, p.price);

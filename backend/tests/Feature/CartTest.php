@@ -7,6 +7,7 @@ use App\Models\Block;
 use App\Models\FootballMatch;
 use App\Models\MatchBlockAllocation;
 use App\Models\MatchPrice;
+use App\Models\Membership;
 use App\Models\Order;
 use App\Models\SalePhase;
 use App\Models\Season;
@@ -86,6 +87,36 @@ class CartTest extends TestCase
 
         $this->alice = User::create(['name' => 'Alice', 'email' => 'a@example.com', 'password' => 'x']);
         $this->bob = User::create(['name' => 'Bob', 'email' => 'b@example.com', 'password' => 'x']);
+    }
+
+    public function test_sale_status_for_member_nonmember_and_outside_phase(): void
+    {
+        $this->match->salePhases()->delete();
+        $presale = SalePhase::create([
+            'match_id' => $this->match->id, 'kind' => 'fanclub_presale', 'eligibility' => 'fanclub',
+            'starts_at' => Carbon::parse('2026-06-01 00:00:00', 'UTC'), 'ends_at' => Carbon::parse('2026-06-02 00:00:00', 'UTC'),
+        ]);
+        Membership::create(['user_id' => $this->alice->id, 'kind' => 'fanclub', 'valid_from' => '2026-01-01', 'valid_until' => '2026-12-31']);
+
+        $this->getJson($this->url(), $this->h($this->alice))
+            ->assertOk()
+            ->assertJsonPath('sale', ['current_phase_id' => $presale->id, 'eligible' => true]);
+        $this->getJson($this->url(), $this->h($this->bob))
+            ->assertOk()
+            ->assertJsonPath('sale', ['current_phase_id' => $presale->id, 'eligible' => false]);
+
+        $this->travelTo(Carbon::parse('2026-06-02 00:00:00', 'UTC'));
+        $this->getJson($this->url(), $this->h($this->alice))
+            ->assertOk()
+            ->assertJsonPath('sale', ['current_phase_id' => null, 'eligible' => false]);
+    }
+
+    public function test_cart_order_has_kind_purchase(): void
+    {
+        $this->add($this->alice, ['seat_id' => $this->seats[1]->id])
+            ->assertCreated()
+            ->assertJsonPath('cart.kind', 'purchase')
+            ->assertJsonPath('sale', ['current_phase_id' => SalePhase::firstOrFail()->id, 'eligible' => true]);
     }
 
     public function test_unauthenticated_is_401(): void

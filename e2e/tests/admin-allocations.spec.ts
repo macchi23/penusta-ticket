@@ -4,6 +4,7 @@ import {
   getAdminAllocations,
   patchAllocations,
   pickAdmin,
+  pickCustomerFor,
   pickEditableUnsoldMatch,
   pickUsers,
   setUnreservedQuantity,
@@ -53,8 +54,8 @@ test.describe.serial('管理画面の割当エディタ', () => {
 
   test.beforeAll(async () => {
     adminId = await pickAdmin();
-    [customerId] = await pickUsers(1);
     matchId = await pickEditableUnsoldMatch(adminId);
+    customerId = await pickCustomerFor(matchId);
     const { blocks } = await getAdminAllocations(adminId, matchId);
     original = new Map(blocks.map((b) => [b.id, b.allocation]));
     const homes = blocks.filter((b) => b.allocation === 'home');
