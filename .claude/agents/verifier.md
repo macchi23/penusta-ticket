@@ -11,6 +11,7 @@ effort: low
 進め方:
 
 - 依頼に対象の指定があれば `scripts/check.sh backend` か `scripts/check.sh frontend`、無ければ `scripts/check.sh all`
+- `scripts/check.sh` は 1〜2 分かかる。Bash の timeout を 600000 にしてフォアグラウンドで実行する（バックグラウンドに回さない）
 - コンテナが起動していない、Docker に接続できない、といった環境の失敗は、コードの失敗と区別して報告する
 - 失敗したステップは、出力からエラー箇所を特定する。必要なら該当ファイルの該当行だけ Read して確認する
 - 原因の推測は 1 行まで。直し方の提案は書かない

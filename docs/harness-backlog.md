@@ -55,7 +55,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | researcher のブリーフに、販売モデルの前提（年パス・会員をいつ売るか、途中加入・解約の有無）を最初から書く。調査の途中で前提を追加した（販売フェーズの年パス検討） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | dev-notes.md に「開発 DB の psql ユーザーは `backend/.env` の `DB_USERNAME`（postgres ではない）」を書く（researcher の指摘） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | implementer.md の Feature テストの定石に足す案: `orders_one_pending_per_user_match` を踏むので pending を複数作るときは user / match を分ける、Enum キャストのモデルで CHECK を検証するときは `DB::table()->insert` を使う | 1 | 2026-10-11 | 候補 |
-| 定義修正 | verifier.md / implementer.md に「`scripts/check.sh` は 120 秒近くかかるので、Bash の timeout を 600000 にしてフォアグラウンドで実行する」を足す案。バックグラウンドに回した verifier が報告を返さずに終了した（販売フェーズのステップ 2）。2026-10-12: phpunit が 80〜100 秒になり、リセール Step 2 の implementer も同じ指摘 | 2 | 2026-10-12 | 候補 |
+| 定義修正 | verifier.md / implementer.md に「`scripts/check.sh` は 120 秒近くかかるので、Bash の timeout を 600000 にしてフォアグラウンドで実行する」を足す案。バックグラウンドに回した verifier が報告を返さずに終了した（販売フェーズのステップ 2）。2026-10-12: phpunit が 80〜100 秒になり、リセール Step 2 の implementer も同じ指摘 | 2 | 2026-10-12 | 採用（`.claude/agents/verifier.md` / `implementer.md`） |
 | 定義修正 | implementer.md の Feature テストの定石に「`BuildsSaleFixture` のブロックコード（M1 等）は `StadiumSeeder` と衝突する。DatabaseSeeder を使うテストは fixture を使うクラスと分ける」を足す案 | 1 | 2026-10-11 | 候補 |
 | hook / check | `PurchaseException` の code（`new self('xxx'`）と `frontend/src/lib/api.ts` の `ApiErrorCode` を突き合わせる。販売フェーズで `not_eligible` を backend に足した時点で api.ts が未更新のまま、初回レビューも見落とした（再レビューで検出。今回はステップ分割で次ステップの予定だった） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 購入まわりのブリーフに「CartTest / CheckoutTest は `BuildsSaleFixture` を使わず自前で試合を作るので、前提データ（フェーズ等）を足したら両方にも足す」を書く。足さずに 44 件落ちた（implementer が自力で対処） | 1 | 2026-10-11 | 候補 |

@@ -26,7 +26,7 @@ effort: medium
   - 後始末は probe の rollback → purge → truncate の順。`DatabaseTruncation` は開始時にしか truncate しないので、終了時に自分で消す
     （残すと後続の `RefreshDatabase` 系テストの件数が壊れる）。phpunit は `--order-by=random` でも 1 回流す
   - 最上位トランザクションでしか呼べないサービス（例: `AllocationChangeService::apply`）は、HTTP 経由のテストも `DatabaseTruncation` で書く
-- 返す前に `scripts/check.sh` を対象（`backend` / `frontend` / `all`）で実行し、通す
+- 返す前に `scripts/check.sh` を対象（`backend` / `frontend` / `all`）で実行し、通す。1〜2 分かかるので Bash の timeout は 600000 にしてフォアグラウンドで実行する
 - ブリーフに無い判断が必要になったら、最も保守的な選択で進め、返却の「逸脱・判断」に書く。
   ブリーフの前提が誤っていて進められない場合は、実装せずにその旨を返す
 - ファイルの書き換えは Edit / Write を使う。macOS の BSD `sed -i` は GNU と引数が違い、複数行の置換で失敗する
