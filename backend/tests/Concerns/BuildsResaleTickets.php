@@ -8,11 +8,13 @@ use App\Enums\TicketStatus;
 use App\Models\Block;
 use App\Models\Order;
 use App\Models\OrderItem;
+use App\Models\ResaleListing;
 use App\Models\SeasonPassSeat;
 use App\Models\Seat;
 use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\User;
+use App\Services\Resale\ResaleCartService;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Str;
 
@@ -72,6 +74,15 @@ trait BuildsResaleTickets
         OrderItem::create(['order_id' => $order->id, 'ticket_id' => $ticket->id, 'ticket_type_id' => $typeId, 'price' => $price]);
 
         return $ticket;
+    }
+
+    /** 仮押さえ → 決済で出品を買う（サービス層）。購入済みの出品を返す。 */
+    private function buyViaCart(User $buyer, ResaleListing $listing): ResaleListing
+    {
+        $cart = app(ResaleCartService::class);
+        $cart->checkout($buyer, $cart->hold($buyer, $listing->id)->hold->id);
+
+        return $listing->fresh();
     }
 
     private function passTicket(User $owner): Ticket

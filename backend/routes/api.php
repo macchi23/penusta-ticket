@@ -14,7 +14,6 @@ use App\Http\Controllers\Api\MyTicketController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\ResaleBoardController;
 use App\Http\Controllers\Api\ResaleCartController;
-use App\Http\Controllers\Api\ResalePurchaseController;
 use App\Http\Controllers\Api\TicketListingController;
 use Illuminate\Support\Facades\Route;
 
@@ -45,7 +44,6 @@ Route::get('/tickets/{ticket}', [MyTicketController::class, 'show'])->middleware
 Route::middleware(['auth:demo', 'throttle:cart'])->group(function () {
     Route::post('/tickets/{ticket}/listing', [TicketListingController::class, 'store'])->whereNumber('ticket');
     Route::delete('/tickets/{ticket}/listing', [TicketListingController::class, 'destroy'])->whereNumber('ticket');
-    Route::post('/resale-listings/{listing}/purchase', [ResalePurchaseController::class, 'store'])->whereNumber('listing');
     Route::post('/resale-listings/{listing}/hold', [ResaleCartController::class, 'hold'])->whereNumber('listing');
     Route::delete('/resale-holds/{hold}', [ResaleCartController::class, 'release'])->whereNumber('hold');
     Route::post('/resale-holds/{hold}/checkout', [ResaleCartController::class, 'checkout'])->whereNumber('hold');

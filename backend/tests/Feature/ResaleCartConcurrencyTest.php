@@ -7,6 +7,7 @@ use App\Enums\OrderStatus;
 use App\Enums\ResaleHoldStatus;
 use App\Enums\ResaleListingStatus;
 use App\Enums\TicketStatus;
+use App\Exceptions\PurchaseException;
 use App\Exceptions\ResaleException;
 use App\Models\Block;
 use App\Models\FootballMatch;
@@ -257,6 +258,172 @@ class ResaleCartConcurrencyTest extends TestCase
 
         $this->assertResale('listing_unavailable', fn () => $this->cart()->checkout($this->bob, $hold->id));
         $this->assertSame(ResaleHoldStatus::Held, $hold->fresh()->status);
+    }
+
+    /** bob の仮押さえを期限切れにする（行は held のまま、時刻条件で無効）。 */
+    private function expireHoldOf(ResaleHold $hold): void
+    {
+        $hold->update(['expires_at' => CarbonImmutable::now()->subSecond()]);
+    }
+
+    public function test_takeover_after_expiry_only_one_buyer_checks_out(): void
+    {
+        $listing = $this->listing();
+        $seatId = $listing->ticket->seat_id;
+        $bobHold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $this->expireHoldOf($bobHold);
+        $this->beforeLock('tickets', fn () => $this->onProbe(function () use ($listing) {
+            $hold = $this->cart()->hold($this->carol, $listing->id)->hold;
+            $this->cart()->checkout($this->carol, $hold->id);
+        }));
+
+        try {
+            $this->cart()->checkout($this->bob, $bobHold->id);
+            $this->fail('cart_expired が投げられるはずが成功した');
+        } catch (PurchaseException $e) {
+            $this->assertSame('cart_expired', $e->errorCode);
+        }
+
+        $this->assertSame(1, $this->liveTicketsAt($seatId));
+        $this->assertSame(1, Order::where('kind', 'resale')->count());
+        $this->assertSame($this->carol->id, Order::where('kind', 'resale')->value('user_id'));
+        $this->assertSame(ResaleListingStatus::Sold, $listing->fresh()->status);
+    }
+
+    public function test_deadline_crossed_while_waiting_for_checkout_lock_is_rejected(): void
+    {
+        $listing = $this->listing();
+        $seatId = $listing->ticket->seat_id;
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $hold->update(['expires_at' => $listing->closes_at->addHour()]);
+        $this->travelTo($listing->closes_at->subMinute());
+        $this->beforeLock('tickets', fn () => $this->travelTo($listing->closes_at));
+
+        $this->assertResale('resale_closed', fn () => $this->cart()->checkout($this->bob, $hold->id));
+
+        $this->assertSame(1, $this->liveTicketsAt($seatId));
+        $this->assertSame(0, Order::where('kind', 'resale')->count());
+        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
+    }
+
+    public function test_cancel_racing_checkout_checkout_first(): void
+    {
+        $listing = $this->listing();
+        $seatId = $listing->ticket->seat_id;
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $this->beforeLock('tickets', fn () => $this->onProbe(
+            fn () => $this->cart()->checkout($this->bob, $hold->id)
+        ));
+
+        $this->assertResale('listing_unavailable', fn () => $this->service()->cancel($this->alice, $listing));
+
+        $this->assertSame(ResaleListingStatus::Sold, $listing->fresh()->status);
+        $this->assertSame(1, $this->liveTicketsAt($seatId));
+        $this->assertSame(TicketStatus::Resold, $listing->ticket->fresh()->status);
+    }
+
+    public function test_cancel_racing_checkout_cancel_first(): void
+    {
+        $listing = $this->listing();
+        $seatId = $listing->ticket->seat_id;
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $this->expireHoldOf($hold);
+        $this->beforeLock('tickets', fn () => $this->onProbe(
+            fn () => $this->service()->cancel($this->alice, $listing)
+        ));
+
+        try {
+            $this->cart()->checkout($this->bob, $hold->id);
+            $this->fail('cart_expired が投げられるはずが成功した');
+        } catch (PurchaseException $e) {
+            $this->assertSame('cart_expired', $e->errorCode);
+        }
+
+        $this->assertSame(ResaleListingStatus::Cancelled, $listing->fresh()->status);
+        $this->assertSame(TicketStatus::Paid, $listing->ticket->fresh()->status);
+        $this->assertSame(1, Ticket::where('seat_id', $seatId)->count());
+        $this->assertSame(0, Order::where('kind', 'resale')->count());
+    }
+
+    public function test_same_buyer_checkout_and_hold_serialize_on_limit(): void
+    {
+        for ($i = 0; $i < 5; $i++) {
+            $hold = $this->cart()->hold($this->bob, $this->listing()->id)->hold;
+            $this->cart()->checkout($this->bob, $hold->id);
+        }
+        $sixth = $this->cart()->hold($this->bob, $this->listing()->id)->hold;
+        $seventh = $this->listing();
+
+        $blocked = null;
+        $this->beforeLock('tickets', function () use ($seventh, &$blocked) {
+            $this->onProbe(function () use ($seventh, &$blocked) {
+                try {
+                    $this->cart()->hold($this->bob, $seventh->id);
+                } catch (ResaleException $e) {
+                    $blocked = $e->errorCode;
+                }
+            });
+        });
+
+        $this->cart()->checkout($this->bob, $sixth->id);
+
+        $this->assertSame('listing_unavailable', $blocked, '同じ buyer の並行操作は advisory lock で待たされる');
+        $this->assertSame(0, ResaleHold::where('listing_id', $seventh->id)->count());
+        $this->assertResale('resale_limit_reached', fn () => $this->cart()->hold($this->bob, $seventh->id));
+        $this->assertSame(6, OrderItem::whereIn('order_id', Order::where('kind', 'resale')->where('user_id', $this->bob->id)->select('id'))->count());
+    }
+
+    public function test_different_buyers_do_not_wait_on_each_other(): void
+    {
+        $a = $this->listing();
+        $b = $this->listing();
+        $holdA = $this->cart()->hold($this->bob, $a->id)->hold;
+        $waited = null;
+        $this->beforeLock('tickets', function () use ($b, &$waited) {
+            $this->onProbe(function () use ($b, &$waited) {
+                try {
+                    $hold = $this->cart()->hold($this->carol, $b->id)->hold;
+                    $this->cart()->checkout($this->carol, $hold->id);
+                    $waited = false;
+                } catch (ResaleException) {
+                    $waited = true;
+                }
+            });
+        });
+
+        $this->cart()->checkout($this->bob, $holdA->id);
+
+        $this->assertFalse($waited);
+        $this->assertSame(2, Order::where('kind', 'resale')->count());
+    }
+
+    public function test_checkout_waits_on_ticket_row_lock(): void
+    {
+        $listing = $this->listing();
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $probe = $this->probeConnection();
+        $probe->beginTransaction();
+        $probe->select('select id from tickets where id = ? for update', [$listing->ticket_id]);
+
+        // SET LOCAL lock_timeout が効いて、待たされたら listing_unavailable に変換される
+        $this->assertResale('listing_unavailable', fn () => $this->cart()->checkout($this->bob, $hold->id));
+        $this->assertSame(ResaleHoldStatus::Held, $hold->fresh()->status);
+    }
+
+    public function test_cancel_lock_order_is_ticket_then_listing_and_never_allocation(): void
+    {
+        $other = $this->listing();
+        $sql = [];
+        DB::listen(function ($q) use (&$sql) {
+            $lower = strtolower($q->sql);
+            if (str_contains($lower, 'for update') || str_contains($lower, 'for share')) {
+                $sql[] = preg_match('/from "(\w+)"/', $lower, $m) ? $m[1] : $lower;
+            }
+        });
+
+        $this->service()->cancel($this->alice, $other);
+
+        $this->assertSame(['tickets', 'resale_listings'], $sql);
     }
 
     public function test_lock_order_is_advisory_tickets_listings_holds(): void

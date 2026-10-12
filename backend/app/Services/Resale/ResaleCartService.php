@@ -18,7 +18,7 @@ use Illuminate\Support\Facades\DB;
  * リセール出品の仮押さえ（resale_holds）。1 人 1 試合で有効な仮押さえは 1 件、1 回の仮押さえは 1 出品だけ。
  *
  * ロック順はすべての操作で「(buyer, match) の advisory → tickets → resale_listings → resale_holds」の部分列。
- * 上限判定は ResaleService::purchase と同じ advisory キーで直列化する。
+ * 上限判定は (buyer, match) の advisory キーで直列化する。
  * 正しさは時刻条件（ResaleHold::live）で保証し、期限切れの行の expired への更新は整理（expireDue / 各操作の副作用）。
  * `now` は最後のロックを取った後に取り、結果オブジェクトで返す。
  */

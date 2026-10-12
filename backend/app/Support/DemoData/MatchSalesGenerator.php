@@ -568,7 +568,7 @@ final class MatchSalesGenerator
             $orderId = $this->sink->nextId('orders');
             $ticketId = $this->sink->nextId('tickets');
 
-            // ResaleService::purchase と同じ形: 元のチケットは resold、同じ席に新しいチケット、resale の注文と明細
+            // ResaleCartService::checkout と同じ形: 元のチケットは resold、同じ席に新しいチケット、resale の注文と明細
             $original = &$this->heldTickets[$listing->ticketId];
             $original[4] = 'resold';
             $original[9] = $created;

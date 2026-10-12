@@ -22,20 +22,14 @@ use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 
 /**
- * チケット 1 枚ずつの出品と、仮押さえなしの即時購入（暫定。仮押さえ経由は ResaleCartService）。
+ * チケット 1 枚ずつの出品と取り下げ、失効の整理（購入は仮押さえ経由の ResaleCartService）。
  *
  * ロック順はすべての操作で「元チケット FOR UPDATE → 出品行 FOR UPDATE」に揃える（出品行は ticket_id が不変なので、
  * ロックなしで読んで ticket_id を得てから取る）。expireDue は出品行だけを更新し、チケットを掴まない。
- *
- * allocation 行はロックしない。購入は paid を 1 枚 resold にして 1 枚 paid を作るだけで consuming 件数が変わらず、
- * チケットのあるブロックは割当変更できない（AllocationChangeService の has_tickets）ので、管理者の変更とも競合しない。
  */
 class ResaleService
 {
-    public function __construct(
-        private ResaleWindow $window,
-        private ResaleSettlement $settlement,
-    ) {}
+    public function __construct(private ResaleWindow $window) {}
 
     /**
      * @throws ResaleException
@@ -195,49 +189,6 @@ class ResaleService
 
             return $locked;
         }, 3);
-    }
-
-    /**
-     * 出品を即時確定で買う。元チケットは resold、買い手に新しいチケットと resale の注文ができる。
-     * 仮押さえ経由の購入（ResaleCartService::checkout）に置き換える暫定の入口。
-     *
-     * @throws ResaleException
-     */
-    public function purchase(User $buyer, ResaleListing $listing): ResaleListing
-    {
-        return $this->settlement->translatingLockTimeout(fn () => $this->purchaseInTransaction($buyer, $listing));
-    }
-
-    private function purchaseInTransaction(User $buyer, ResaleListing $listing): ResaleListing
-    {
-        return DB::transaction(function () use ($buyer, $listing) {
-            // ロック待ちを長引かせない
-            $this->settlement->setLockTimeout();
-
-            $head = ResaleListing::whereKey($listing->id)->first(['id', 'ticket_id', 'match_id'])
-                ?? throw ResaleException::listingUnavailable();
-
-            $this->settlement->lockBuyer($buyer, $head->match_id);
-            $this->settlement->assertWithinLimit($buyer, $head->match_id);
-
-            $ticket = Ticket::whereKey($head->ticket_id)->lockForUpdate()->first()
-                ?? throw ResaleException::listingUnavailable();
-            $locked = ResaleListing::whereKey($head->id)->lockForUpdate()->first()
-                ?? throw ResaleException::listingUnavailable();
-
-            // ロック待ちの間に締切を跨ぎうるので、時刻はロック取得後に取る
-            $now = CarbonImmutable::now();
-
-            $this->settlement->assertPurchasable($buyer, $ticket, $locked, $now);
-            // 暫定: 仮押さえの導入中、有効な仮押さえがある出品（自分のものを含む）は即時購入させない
-            if (ResaleHold::live($now)->where('listing_id', $locked->id)->exists()) {
-                throw ResaleException::listingUnavailable();
-            }
-
-            $this->settlement->settle($buyer, $ticket, $locked, $now);
-
-            return $locked;
-        }, 1); // 再試行しない: 決済をトランザクション内で呼ぶので、再試行は実決済で二重課金になりうる(ロック順は固定でデッドロックしない)
     }
 
     /**

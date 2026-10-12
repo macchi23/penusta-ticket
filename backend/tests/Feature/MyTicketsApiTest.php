@@ -123,7 +123,7 @@ class MyTicketsApiTest extends TestCase
     {
         $ticket = $this->paidTicket($this->alice);
         $listing = app(ResaleService::class)->list($this->alice, $ticket, 4000);
-        app(ResaleService::class)->purchase($this->bob, $listing);
+        $this->buyViaCart($this->bob, $listing);
 
         $row = $this->mine($this->alice)[0];
         $this->assertSame('resold', $row['status']);
@@ -233,7 +233,7 @@ class MyTicketsApiTest extends TestCase
         $this->assertNull($listed->json('ticket.listing_terms'));
         $this->assertStringNotContainsString($ticket->qr_uuid, $listed->getContent());
 
-        app(ResaleService::class)->purchase($this->bob, $listing);
+        $this->buyViaCart($this->bob, $listing);
         $resold = $this->getJson("/api/tickets/{$ticket->id}", $this->h($this->alice))->assertOk();
         $this->assertNull($resold->json('ticket.qr_uuid'));
         $this->assertStringNotContainsString($ticket->qr_uuid, $resold->getContent());

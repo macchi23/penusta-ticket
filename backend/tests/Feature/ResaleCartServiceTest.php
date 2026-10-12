@@ -20,6 +20,7 @@ use App\Models\User;
 use App\Services\Resale\ResaleBoardService;
 use App\Services\Resale\ResaleCartService;
 use App\Services\Resale\ResaleService;
+use App\Services\SeasonPass\SeasonPassIssuer;
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\ModelNotFoundException;
 use Illuminate\Foundation\Testing\RefreshDatabase;
@@ -355,8 +356,12 @@ class ResaleCartServiceTest extends TestCase
         $listing = $this->listing();
         $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
         config(['ticketing.mock_payment_outcome' => 'declined']);
+        $tickets = Ticket::count();
 
         $this->assertResale('payment_failed', fn () => $this->cart()->checkout($this->bob, $hold->id));
+
+        $this->assertSame($tickets, Ticket::count());
+        $this->assertNull($listing->fresh()->new_ticket_id);
 
         $this->assertSame(ResaleHoldStatus::Held, $hold->fresh()->status);
         $this->assertNull($hold->fresh()->order_id);
@@ -392,7 +397,96 @@ class ResaleCartServiceTest extends TestCase
         $this->cart()->checkout($this->carol, $hold->id);
     }
 
-    // cancel / 一覧 / 旧 purchase
+    public function test_checkout_creates_new_ticket_and_item_with_same_seat(): void
+    {
+        $listing = $this->listing();
+        $old = $listing->ticket;
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+
+        $order = $this->cart()->checkout($this->bob, $hold->id)->order;
+
+        $new = Ticket::findOrFail($listing->fresh()->new_ticket_id);
+        $this->assertSame($old->match_id, $new->match_id);
+        $this->assertSame($old->block_id, $new->block_id);
+        $this->assertSame($old->seat_id, $new->seat_id);
+        $this->assertNotSame($old->qr_uuid, $new->qr_uuid);
+        $this->assertNull($new->season_pass_seat_id);
+        $item = $order->items()->sole();
+        $this->assertSame($new->id, $item->ticket_id);
+        $this->assertSame(4000, $item->price);
+        $this->assertSame($this->adult->id, $item->ticket_type_id);
+    }
+
+    public function test_checkout_of_season_pass_ticket_is_not_reissued(): void
+    {
+        $listing = app(ResaleService::class)->list($this->alice, $this->passTicket($this->alice), 3000);
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+
+        $this->cart()->checkout($this->bob, $hold->id);
+
+        $this->assertSame(0, app(SeasonPassIssuer::class)->issueForMatch($this->match));
+        $this->assertSame(2, Ticket::count());
+        $this->assertNull(Ticket::findOrFail($listing->fresh()->new_ticket_id)->season_pass_seat_id);
+    }
+
+    public function test_reserved_seat_has_single_occupying_ticket_after_checkout(): void
+    {
+        $listing = $this->listing();
+        $seatId = $listing->ticket->seat_id;
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+
+        $this->cart()->checkout($this->bob, $hold->id);
+
+        $this->assertSame(1, Ticket::where('seat_id', $seatId)->whereNotIn('status', ['released', 'expired', 'resold'])->count());
+        $this->assertSame(2, Ticket::where('seat_id', $seatId)->count());
+    }
+
+    public function test_unreserved_consuming_count_is_unchanged_by_checkout(): void
+    {
+        $ticket = $this->paidTicket($this->alice, $this->free);
+        $this->paidTicket($this->alice, $this->free);
+        $count = fn () => Ticket::where('match_id', $this->match->id)->where('block_id', $this->free->id)->consumingInventory($this->now())->count();
+        $this->assertSame(2, $count());
+        $listing = app(ResaleService::class)->list($this->alice, $ticket, 4000);
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+
+        $this->cart()->checkout($this->bob, $hold->id);
+
+        $this->assertSame(2, $count());
+    }
+
+    public function test_six_checkouts_then_seventh_hold_is_limited(): void
+    {
+        for ($i = 1; $i <= 6; $i++) {
+            $this->buyViaCart($this->bob, $this->listing());
+        }
+        $seventh = $this->listing();
+
+        $this->assertResale('resale_limit_reached', fn () => $this->cart()->hold($this->bob, $seventh->id));
+        $this->assertSame(ResaleListingStatus::Active, $seventh->fresh()->status);
+    }
+
+    public function test_checkout_of_listing_cancelled_after_hold_expired_is_cart_expired(): void
+    {
+        $listing = $this->listing();
+        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
+        $this->travelTo($hold->expires_at);
+        app(ResaleService::class)->cancel($this->alice, $listing);
+
+        $this->assertPurchase('cart_expired', fn () => $this->cart()->checkout($this->bob, $hold->id));
+        $this->assertSame(0, Order::where('kind', 'resale')->count());
+    }
+
+    public function test_cancel_after_checkout_is_listing_unavailable(): void
+    {
+        $listing = $this->listing();
+        $this->buyViaCart($this->bob, $listing);
+
+        $this->assertResale('listing_unavailable', fn () => app(ResaleService::class)->cancel($this->alice, $listing));
+        $this->assertSame(ResaleListingStatus::Sold, $listing->fresh()->status);
+    }
+
+    // cancel / 一覧
 
     public function test_cancel_is_rejected_while_held_and_allowed_after(): void
     {
@@ -422,25 +516,6 @@ class ResaleCartServiceTest extends TestCase
 
         $this->travelTo($hold->expires_at);
         $this->assertEqualsCanonicalizing([$held->id, $free->id], $ids($this->carol));
-    }
-
-    public function test_legacy_purchase_is_blocked_by_others_live_hold(): void
-    {
-        $listing = $this->listing();
-        $this->cart()->hold($this->bob, $listing->id);
-
-        $this->assertResale('listing_unavailable', fn () => app(ResaleService::class)->purchase($this->carol, $listing));
-        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
-    }
-
-    public function test_legacy_purchase_is_blocked_by_own_live_hold(): void
-    {
-        $listing = $this->listing();
-        $hold = $this->cart()->hold($this->bob, $listing->id)->hold;
-
-        $this->assertResale('listing_unavailable', fn () => app(ResaleService::class)->purchase($this->bob, $listing));
-        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
-        $this->assertSame(ResaleHoldStatus::Held, $hold->fresh()->status);
     }
 
     // 押さえ直しのクールダウン

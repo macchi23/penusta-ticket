@@ -176,7 +176,7 @@ class ResaleCartApiTest extends TestCase
     {
         $max = (int) config('ticketing.max_tickets_per_order');
         for ($i = 0; $i < $max; $i++) {
-            app(ResaleService::class)->purchase($this->bob, $this->listed($this->alice));
+            $this->buyViaCart($this->bob, $this->listed($this->alice));
         }
         $listing = $this->listed($this->alice);
 
@@ -184,7 +184,7 @@ class ResaleCartApiTest extends TestCase
 
         $this->travelTo($this->match->kickoff_at->subMinutes(150));
         $this->hold($this->carol, $listing)->assertUnprocessable()->assertJsonPath('code', 'resale_closed');
-        $this->assertSame(0, ResaleHold::count());
+        $this->assertSame(0, ResaleHold::where('status', ResaleHoldStatus::Held->value)->count());
         $this->assertSame(0, ActivityEvent::where('event_type', 'resale_add_to_cart')->count());
     }
 
@@ -283,6 +283,10 @@ class ResaleCartApiTest extends TestCase
         $this->assertSame(220, $order['buyer_fee']);
         $this->assertSame(4220, $order['total']);
         $this->assertCount(1, $order['items']);
+        $this->assertSame(4000, $order['items'][0]['price']);
+        $this->assertSame('paid', $order['items'][0]['ticket_status']);
+        $this->assertNull($order['items'][0]['resale_payout']);
+        $this->assertSame(4220, Order::findOrFail($order['id'])->total);
         $this->assertSame(ResaleListingStatus::Sold, $listing->fresh()->status);
         $this->assertSame(ResaleHoldStatus::Purchased, ResaleHold::sole()->status);
 

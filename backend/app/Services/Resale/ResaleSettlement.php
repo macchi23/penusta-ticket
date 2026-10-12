@@ -21,7 +21,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 /**
- * リセール購入の共通部品（即時購入 ResaleService と、仮押さえ経由 ResaleCartService が共有する）。
+ * リセール購入の確定処理（仮押さえ経由 ResaleCartService が使う）。
+ * allocation 行はロックしない。購入は paid を 1 枚 resold にして 1 枚 paid を作るだけで consuming 件数が変わらず、
+ * チケットのあるブロックは割当変更できない（AllocationChangeService の has_tickets）ので、管理者の変更とも競合しない。
  * ロックの取得順は呼び出し側が決める: advisory → tickets → resale_listings → resale_holds。
  */
 class ResaleSettlement

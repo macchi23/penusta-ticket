@@ -2,12 +2,9 @@
 
 namespace Tests\Feature;
 
-use App\Enums\OrderKind;
 use App\Enums\ResaleListingStatus;
-use App\Enums\TicketStatus;
 use App\Models\ActivityEvent;
 use App\Models\FootballMatch;
-use App\Models\Order;
 use App\Models\ResaleListing;
 use App\Models\SalePhase;
 use App\Models\Ticket;
@@ -56,11 +53,6 @@ class ResaleApiTest extends TestCase
         $this->app['auth']->forgetGuards();
 
         return $this->getJson("/api/matches/{$this->match->id}/resale-listings", $user ? $this->h($user) : []);
-    }
-
-    private function buy(User $user, ResaleListing $listing)
-    {
-        return $this->postJson("/api/resale-listings/{$listing->id}/purchase", [], $this->h($user));
     }
 
     // 出品・取り下げ
@@ -124,7 +116,7 @@ class ResaleApiTest extends TestCase
         $this->list($this->alice, $ticket, 4000)->assertCreated();
         $this->list($this->alice, $ticket, 3000)->assertUnprocessable()->assertJsonPath('code', 'not_listable');
 
-        $bought = app(ResaleService::class)->purchase($this->bob, $this->listed($this->carol));
+        $bought = $this->buyViaCart($this->bob, $this->listed($this->carol));
         $this->list($this->bob, $bought->newTicket, 3000)->assertUnprocessable()->assertJsonPath('code', 'not_listable');
 
         $another = $this->paidTicket($this->alice);
@@ -276,84 +268,6 @@ class ResaleApiTest extends TestCase
         $this->assertSame([], $this->board($this->bob)->json('blocks'));
     }
 
-    // 購入
-
-    public function test_purchase_creates_resale_order_and_event(): void
-    {
-        $listing = $this->listed($this->alice, 4000);
-
-        $res = $this->buy($this->bob, $listing)->assertCreated();
-
-        $order = $res->json('order');
-        $this->assertSame('resale', $order['kind']);
-        $this->assertSame('paid', $order['status']);
-        $this->assertSame(220, $order['buyer_fee']);
-        $this->assertSame(4220, $order['total']);
-        $this->assertSame(4220, Order::find($order['id'])->total);
-        $this->assertCount(1, $order['items']);
-        $this->assertSame(4000, $order['items'][0]['price']);
-        $this->assertSame('paid', $order['items'][0]['ticket_status']);
-        $this->assertNull($order['items'][0]['resale_payout']);
-        $this->assertSame(ResaleListingStatus::Sold, $listing->fresh()->status);
-
-        $event = ActivityEvent::where('event_type', 'resale_purchase')->sole();
-        $this->assertSame($this->bob->id, $event->user_id);
-        $this->assertEquals([
-            'listing_id' => $listing->id, 'order_id' => $order['id'], 'match_id' => $this->match->id,
-            'block_id' => $this->reserved->id, 'price' => 4000, 'total' => 4220, 'discount_rate' => 0.2,
-        ], $event->payload);
-    }
-
-    public function test_purchase_rejections(): void
-    {
-        $listing = $this->listed($this->alice, 4000);
-
-        $this->buy($this->alice, $listing)->assertUnprocessable()->assertJsonPath('code', 'own_listing');
-        $this->app['auth']->forgetGuards();
-        $this->postJson("/api/resale-listings/{$listing->id}/purchase")->assertUnauthorized();
-        $this->postJson('/api/resale-listings/999999/purchase', [], $this->h($this->bob))->assertNotFound();
-
-        $this->buy($this->bob, $listing)->assertCreated();
-        $this->buy($this->carol, $listing)->assertStatus(409)->assertJsonPath('code', 'listing_unavailable');
-        $this->assertSame(1, ActivityEvent::where('event_type', 'resale_purchase')->count());
-    }
-
-    public function test_purchase_after_deadline_is_closed(): void
-    {
-        $listing = $this->listed($this->alice, 4000);
-        $this->travelTo($this->match->kickoff_at->subMinutes(150));
-
-        $this->buy($this->bob, $listing)->assertUnprocessable()->assertJsonPath('code', 'resale_closed');
-        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
-    }
-
-    public function test_purchase_limit(): void
-    {
-        $max = (int) config('ticketing.max_tickets_per_order');
-        for ($i = 0; $i < $max; $i++) {
-            $this->buy($this->bob, $this->listed($this->alice))->assertCreated();
-        }
-
-        $this->buy($this->bob, $this->listed($this->alice))->assertUnprocessable()->assertJsonPath('code', 'resale_limit_reached');
-    }
-
-    public function test_payment_failure_records_event_and_rolls_back(): void
-    {
-        $listing = $this->listed($this->alice, 4000);
-        config(['ticketing.mock_payment_outcome' => 'declined']);
-
-        $this->buy($this->bob, $listing)->assertStatus(402)->assertJsonPath('code', 'payment_failed');
-
-        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
-        $this->assertSame(TicketStatus::Paid, $listing->ticket->fresh()->status);
-        $this->assertSame(0, Order::where('kind', OrderKind::Resale->value)->count());
-        $event = ActivityEvent::where('event_type', 'payment_failed')->sole();
-        $this->assertEquals([
-            'source' => 'resale', 'match_id' => $this->match->id, 'listing_id' => $listing->id, 'quantity' => 1, 'reason' => 'declined',
-        ], $event->payload);
-        $this->assertSame(0, ActivityEvent::where('event_type', 'resale_purchase')->count());
-    }
-
     // OrderResource
 
     public function test_sellers_original_order_keeps_resold_item_and_total(): void
@@ -365,7 +279,7 @@ class ResaleApiTest extends TestCase
         $this->assertSame('paid', $before['items'][0]['ticket_status']);
         $this->assertSame(0, $before['buyer_fee']);
 
-        $this->buy($this->bob, $listing)->assertCreated();
+        $this->buyViaCart($this->bob, $listing);
 
         $after = $this->getJson("/api/orders/{$orderId}", $this->h($this->alice))->assertOk()->json('order');
         $this->assertSame('purchase', $after['kind']);

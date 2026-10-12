@@ -17,9 +17,9 @@ use App\Models\Seat;
 use App\Models\Ticket;
 use App\Models\TicketType;
 use App\Models\User;
+use App\Services\Resale\ResaleCartService;
 use App\Services\Resale\ResaleService;
 use App\Services\Resale\ResaleWindow;
-use App\Services\SeasonPass\SeasonPassIssuer;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Scheduling\Event;
 use Illuminate\Console\Scheduling\Schedule;
@@ -212,7 +212,10 @@ class ResaleServiceTest extends TestCase
 
     public function test_resale_ticket_cannot_be_relisted(): void
     {
-        $bought = $this->service()->purchase($this->bob, $this->listing($this->alice));
+        $cart = app(ResaleCartService::class);
+        $listing = $this->listing($this->alice);
+        $cart->checkout($this->bob, $cart->hold($this->bob, $listing->id)->hold->id);
+        $bought = $listing->fresh();
         $newTicket = Ticket::findOrFail($bought->new_ticket_id);
 
         $this->assertResale('not_listable', fn () => $this->service()->list($this->bob, $newTicket, 3000));
@@ -267,127 +270,6 @@ class ResaleServiceTest extends TestCase
         $this->assertSame(3752, $listing->face_price); // 3752.25
     }
 
-    public function test_season_pass_purchase_is_not_reissued(): void
-    {
-        $ticket = $this->passTicket($this->alice);
-        $listing = $this->service()->list($this->alice, $ticket, 3000);
-        $this->service()->purchase($this->bob, $listing);
-
-        $this->assertSame(0, app(SeasonPassIssuer::class)->issueForMatch($this->match));
-        $this->assertSame(2, Ticket::count());
-        $new = Ticket::findOrFail($listing->fresh()->new_ticket_id);
-        $this->assertNull($new->season_pass_seat_id);
-    }
-
-    // 購入
-
-    public function test_purchase_creates_ticket_order_and_marks_sold(): void
-    {
-        $ticket = $this->paidTicket($this->alice);
-        $listing = $this->service()->list($this->alice, $ticket, 4000);
-
-        $result = $this->service()->purchase($this->bob, $listing);
-
-        $this->assertSame(ResaleListingStatus::Sold, $result->status);
-        $this->assertSame(TicketStatus::Resold, $ticket->fresh()->status);
-
-        $new = Ticket::findOrFail($result->new_ticket_id);
-        $this->assertSame(TicketStatus::Paid, $new->status);
-        $this->assertSame($ticket->match_id, $new->match_id);
-        $this->assertSame($ticket->block_id, $new->block_id);
-        $this->assertSame($ticket->seat_id, $new->seat_id);
-        $this->assertNotSame($ticket->qr_uuid, $new->qr_uuid);
-        $this->assertNull($new->season_pass_seat_id);
-
-        $order = Order::findOrFail($result->buyer_order_id);
-        $this->assertSame($this->bob->id, $order->user_id);
-        $this->assertSame(OrderStatus::Paid, $order->status);
-        $this->assertSame(OrderKind::Resale, $order->kind);
-        $this->assertSame(4220, $order->total);
-        $item = $order->items()->sole();
-        $this->assertSame($new->id, $item->ticket_id);
-        $this->assertSame(4000, $item->price);
-        $this->assertSame($this->adult->id, $item->ticket_type_id);
-    }
-
-    public function test_cannot_buy_own_listing(): void
-    {
-        $listing = $this->listing($this->alice);
-        $this->assertResale('own_listing', fn () => $this->service()->purchase($this->alice, $listing));
-    }
-
-    public function test_cannot_buy_closed_cancelled_or_expired(): void
-    {
-        $closing = $this->listing($this->alice);
-        $this->travelTo($this->match->kickoff_at->subMinutes(150));
-        $this->assertResale('resale_closed', fn () => $this->service()->purchase($this->bob, $closing));
-
-        $this->travelTo(CarbonImmutable::parse('2030-02-01 00:00:00', 'UTC'));
-        $cancelled = $this->listing($this->alice);
-        $this->service()->cancel($this->alice, $cancelled);
-        $this->assertResale('listing_unavailable', fn () => $this->service()->purchase($this->bob, $cancelled));
-
-        $expired = $this->listing($this->alice);
-        $expired->update(['status' => 'expired']);
-        $this->assertResale('listing_unavailable', fn () => $this->service()->purchase($this->bob, $expired));
-
-        $this->assertSame(0, Order::where('kind', 'resale')->count());
-    }
-
-    public function test_purchase_after_sold_is_rejected(): void
-    {
-        $listing = $this->listing($this->alice);
-        $this->service()->purchase($this->bob, $listing);
-        $carol = User::create(['name' => 'Carol', 'email' => 'c@example.com', 'password' => 'x']);
-        $this->assertResale('listing_unavailable', fn () => $this->service()->purchase($carol, $listing));
-    }
-
-    public function test_purchase_limit(): void
-    {
-        for ($i = 1; $i <= 6; $i++) {
-            $this->service()->purchase($this->bob, $this->listing($this->alice));
-        }
-        $seventh = $this->listing($this->alice);
-        $this->assertResale('resale_limit_reached', fn () => $this->service()->purchase($this->bob, $seventh));
-        $this->assertSame(ResaleListingStatus::Active, $seventh->fresh()->status);
-    }
-
-    public function test_payment_failure_leaves_nothing(): void
-    {
-        $ticket = $this->paidTicket($this->alice);
-        $listing = $this->service()->list($this->alice, $ticket, 4000);
-        config(['ticketing.mock_payment_outcome' => 'declined']);
-
-        $this->assertResale('payment_failed', fn () => $this->service()->purchase($this->bob, $listing));
-
-        $this->assertSame(TicketStatus::Paid, $ticket->fresh()->status);
-        $this->assertSame(1, Ticket::count());
-        $this->assertSame(0, Order::where('kind', 'resale')->count());
-        $this->assertSame(ResaleListingStatus::Active, $listing->fresh()->status);
-        $this->assertNull($listing->fresh()->new_ticket_id);
-    }
-
-    public function test_reserved_seat_has_single_occupying_ticket_after_purchase(): void
-    {
-        $ticket = $this->paidTicket($this->alice);
-        $this->service()->purchase($this->bob, $this->service()->list($this->alice, $ticket, 4000));
-
-        $this->assertSame(1, Ticket::where('seat_id', $ticket->seat_id)->whereNotIn('status', ['released', 'expired', 'resold'])->count());
-        $this->assertSame(2, Ticket::where('seat_id', $ticket->seat_id)->count());
-    }
-
-    public function test_unreserved_consuming_count_is_unchanged(): void
-    {
-        $ticket = $this->paidTicket($this->alice, $this->free);
-        $this->paidTicket($this->alice, $this->free);
-        $count = fn () => Ticket::where('match_id', $this->match->id)->where('block_id', $this->free->id)->consumingInventory($this->now())->count();
-        $this->assertSame(2, $count());
-
-        $this->service()->purchase($this->bob, $this->service()->list($this->alice, $ticket, 4000));
-
-        $this->assertSame(2, $count());
-    }
-
     // 失効とコマンド
 
     public function test_expire_due(): void
@@ -397,7 +279,8 @@ class ResaleServiceTest extends TestCase
         $later->update(['closes_at' => $this->now()->addHour()]);
         $due->update(['closes_at' => $this->now()]);
         $sold = $this->listing($this->alice);
-        $this->service()->purchase($this->bob, $sold);
+        $cart = app(ResaleCartService::class);
+        $cart->checkout($this->bob, $cart->hold($this->bob, $sold->id)->hold->id);
         $sold->update(['closes_at' => $this->now()->subHour()]);
 
         $this->assertSame(1, $this->service()->expireDue($this->now()));
