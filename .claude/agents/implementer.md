@@ -14,6 +14,9 @@ effort: medium
 - frontend を触るときは、書く前に `frontend/node_modules/next/dist/docs/` の該当ガイドを読む
 - API のレスポンスを変えるときは `frontend/src/lib/api.ts` の型を先に確定し、backend をそれに合わせる
 - backend の変更には Feature テストを書く。DB を使うテストは `RefreshDatabase` を使う（テストは `penusta_test` で走る）
+  - demo guard（`X-Demo-User-Id`）は 1 テスト内のリクエスト間でユーザーをキャッシュする。ユーザーを切り替える・未ログインに戻すときは、
+    リクエストの前に `auth()->forgetGuards()` を呼ぶ（呼ばないと、ユーザーで変わる応答の検証が前のユーザーのまま誤って通る）
+  - jsonb の payload の比較は `assertEquals`（キー順は保存されない）
 - ロックの待ち合いや同時実行を検証するテストは、`RefreshDatabase` ではできない（テスト全体が 1 トランザクションで、別接続から見えない）。
   次の定石に従う:
   - クラスは `DatabaseTruncation` + `tests/Concerns/UsesProbeConnection`（別接続 `probe` で行を `FOR SHARE` / `FOR UPDATE` で握り、
