@@ -28,6 +28,8 @@ class ResaleBoardService
                 ->where('status', ResaleListingStatus::Active->value)
                 ->where('closes_at', '>', $now)
                 ->where('seller_user_id', '!=', $viewer->id)
+                // 仮押さえ中の出品は、自分が押さえた分も含めて出さない
+                ->whereDoesntHave('holds', fn ($q) => $q->live($now))
                 ->with(['ticket.seat', 'block.stand', 'block.seatCategory', 'ticketType'])
                 ->get()
             : collect();

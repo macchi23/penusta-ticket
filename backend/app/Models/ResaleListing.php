@@ -6,6 +6,7 @@ use App\Enums\ResaleListingStatus;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class ResaleListing extends Model
 {
@@ -74,5 +75,10 @@ class ResaleListing extends Model
     public function buyerOrder(): BelongsTo
     {
         return $this->belongsTo(Order::class, 'buyer_order_id');
+    }
+
+    public function holds(): HasMany
+    {
+        return $this->hasMany(ResaleHold::class, 'listing_id');
     }
 }

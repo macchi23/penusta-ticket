@@ -30,6 +30,8 @@ return [
         'lock_timeout_ms' => (int) env('TICKETING_RESALE_LOCK_TIMEOUT_MS', 2500),
         // キックオフの何分前にリセールを締め切るか
         'close_minutes_before_kickoff' => (int) env('TICKETING_RESALE_CLOSE_MINUTES', 150),
+        // 同じ出品の押さえ直しを拒否する時間（分）。解除・期限切れの時刻から数える
+        'hold_cooldown_minutes' => (int) env('TICKETING_RESALE_HOLD_COOLDOWN_MINUTES', 30),
         // 年パス券の定価 = 単券の大人価格 × (1 - この率)
         'season_pass_discount_rate' => (float) env('TICKETING_RESALE_SEASON_PASS_DISCOUNT_RATE', 0.25),
     ],

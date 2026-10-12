@@ -40,6 +40,21 @@ class ResaleException extends Exception
         return new self('listing_unavailable', 'この出品は購入できません。', 409);
     }
 
+    public static function holdExists(): self
+    {
+        return new self('resale_hold_exists', 'この試合ではすでに別の出品を仮押さえしています。', 409);
+    }
+
+    public static function holdCooldown(int $minutes): self
+    {
+        return new self('resale_hold_cooldown', "この出品は一度仮押さえを外したため、{$minutes} 分間は再度押さえられません。", 409);
+    }
+
+    public static function listingHeld(): self
+    {
+        return new self('listing_held', 'この出品は購入手続き中のため取り下げできません。', 409);
+    }
+
     public static function ownListing(): self
     {
         return new self('own_listing', '自分の出品は購入できません。', 422);
