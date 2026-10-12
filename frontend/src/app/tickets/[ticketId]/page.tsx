@@ -53,7 +53,7 @@ export default async function TicketPage(props: PageProps<"/tickets/[ticketId]">
         <div className="mt-1">
           {t.ticket_type.name} ・ {ticketPriceLabel(t)} ・ 入手経路: {SOURCE_LABEL[t.source]}
         </div>
-        <div className="mt-2">
+        <div className="mt-2 flex flex-wrap gap-2">
           <ListingStatusBadge ticket={t} />
         </div>
         <div className="mt-2 flex gap-4">
@@ -93,6 +93,9 @@ export default async function TicketPage(props: PageProps<"/tickets/[ticketId]">
               出品中 ・ 出品価格 {yen(active.price)} ・ 受取額 {yen(active.payout)}
             </p>
             <p className="text-gray-500">受付締切 {formatJst(active.closes_at)}</p>
+            {active.on_hold && (
+              <p className="mt-1 text-gray-500">購入手続き中のため取り下げできません。</p>
+            )}
             {t.can_cancel && <CancelListingButton ticketId={t.id} />}
           </div>
         )}

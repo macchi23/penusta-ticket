@@ -296,9 +296,9 @@ export async function getMyTickets(userId: number): Promise<MyTicketLite[]> {
 }
 
 // リセールで買える人（この試合で resale 注文が上限の 6 枚に達していない人）。exclude は除く
-export async function pickResaleBuyer(matchId: number, exclude: number): Promise<number> {
+export async function pickResaleBuyer(matchId: number, ...exclude: number[]): Promise<number> {
   const { data } = await getJson<{ data: { id: number; role: string }[] }>(undefined, '/api/demo/users?limit=200');
-  for (const u of data.filter((x) => x.role === 'customer' && x.id !== exclude).reverse()) {
+  for (const u of data.filter((x) => x.role === 'customer' && !exclude.includes(x.id)).reverse()) {
     const bought = (await getMyTickets(u.id)).filter((t) => t.source === 'resale' && t.match.id === matchId).length;
     if (bought < 5) return u.id;
   }
@@ -316,6 +316,40 @@ export async function buySeat(userId: number, matchId: number, seatId: number): 
     const pay = await api.post(`/api/orders/${cart.id}/checkout`);
     if (!pay.ok()) throw new Error(`checkout -> ${pay.status()} ${await pay.text()}`);
     return cart.id;
+  } finally {
+    await api.dispose();
+  }
+}
+
+// 券を API で出品する
+export async function listTicketApi(userId: number, ticketId: number, price: number): Promise<void> {
+  const api = await newApi(userId);
+  try {
+    const res = await api.post(`/api/tickets/${ticketId}/listing`, { data: { price } });
+    if (!res.ok()) throw new Error(`POST listing -> ${res.status()} ${await res.text()}`);
+  } finally {
+    await api.dispose();
+  }
+}
+
+// 出品を取り下げる。取り下げられない状態（売却済み等）は無視する後始末用
+export async function cancelListingApi(userId: number, ticketId: number): Promise<void> {
+  const api = await newApi(userId);
+  try {
+    await api.delete(`/api/tickets/${ticketId}/listing`);
+  } finally {
+    await api.dispose();
+  }
+}
+
+// その試合で自分が持つリセールの仮押さえを解除する（なければ何もしない）
+export async function releaseResaleHold(userId: number, matchId: number): Promise<void> {
+  const { hold } = await getJson<{ hold: { id: number } | null }>(userId, `/api/matches/${matchId}/resale-cart`);
+  if (!hold) return;
+  const api = await newApi(userId);
+  try {
+    const res = await api.delete(`/api/resale-holds/${hold.id}`);
+    if (!res.ok()) throw new Error(`DELETE resale-hold ${hold.id} -> ${res.status()}`);
   } finally {
     await api.dispose();
   }

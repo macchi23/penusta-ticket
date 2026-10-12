@@ -2,10 +2,10 @@
 
 import { refresh, revalidatePath } from "next/cache";
 import { redirect, RedirectType } from "next/navigation";
-import type { ActionResult, MyListing } from "@/lib/api";
+import type { ActionResult, MyListing, ResaleHold } from "@/lib/api";
 import { apiCall } from "@/lib/server-api";
 
-const REFRESH_ON_ERROR = ["listing_unavailable", "not_listable", "resale_closed", "not_owner", "own_listing"];
+const REFRESH_ON_ERROR = ["listing_unavailable", "not_listable", "resale_closed", "not_owner", "own_listing", "resale_hold_exists", "cart_expired"];
 
 // 成功時は /tickets 配下を再検証（UI も更新される）。失敗時は状態が古い可能性があるので画面だけ再取得
 function sync(ok: boolean, code?: string) {
@@ -35,9 +35,33 @@ export async function cancelListing(ticketId: number): Promise<ActionResult<{ li
   return result;
 }
 
-export async function purchaseListing(listingId: number): Promise<ActionResult<never>> {
-  if (!isId(listingId)) return invalid();
-  const result = await apiCall<{ order: { id: number } }>("POST", `/api/resale-listings/${listingId}/purchase`);
+// 出品を仮押さえして決済画面へ。成功時は redirect されるので戻らない
+export async function holdListing(matchId: number, listingId: number): Promise<ActionResult<never>> {
+  if (!isId(matchId) || !isId(listingId)) return invalid();
+  const result = await apiCall<{ hold: ResaleHold }>("POST", `/api/resale-listings/${listingId}/hold`);
+  if (!result.ok) {
+    sync(false, result.error.code);
+    return result;
+  }
+  revalidatePath("/matches/[id]", "page");
+  redirect(`/matches/${matchId}/resale-checkout`);
+}
+
+// 仮押さえを取り消して試合ページへ戻る
+export async function releaseHold(matchId: number, holdId: number): Promise<ActionResult<never>> {
+  if (!isId(matchId) || !isId(holdId)) return invalid();
+  const result = await apiCall<null>("DELETE", `/api/resale-holds/${holdId}`);
+  if (!result.ok) {
+    sync(false, result.error.code);
+    return result;
+  }
+  revalidatePath("/matches/[id]", "page");
+  redirect(`/matches/${matchId}`, RedirectType.replace);
+}
+
+export async function checkoutHold(holdId: number): Promise<ActionResult<never>> {
+  if (!isId(holdId)) return invalid();
+  const result = await apiCall<{ order: { id: number } }>("POST", `/api/resale-holds/${holdId}/checkout`);
   if (!result.ok) {
     sync(false, result.error.code);
     return result;

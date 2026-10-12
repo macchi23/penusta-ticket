@@ -1,14 +1,27 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import type { ResaleBoard, ResaleOffer } from "@/lib/api";
-import { purchaseListing } from "@/lib/actions/resale";
+import Link from "next/link";
+import type { ResaleBoard, ResaleHold } from "@/lib/api";
+import { holdListing } from "@/lib/actions/resale";
 import { formatJst, yen } from "@/lib/format";
 import { resaleErrorMessage } from "@/lib/resale-messages";
+import HoldCountdown from "@/components/HoldCountdown";
 import ResaleViewTracker from "@/components/ResaleViewTracker";
 
 // board が null のときは取得失敗
-export default function ResaleSection({ matchId, board }: { matchId: number; board: ResaleBoard | null }) {
+export default function ResaleSection({
+  matchId,
+  board,
+  hold,
+  serverTime,
+}: {
+  matchId: number;
+  board: ResaleBoard | null;
+  // 自分の有効な仮押さえ（なければ null）
+  hold: ResaleHold | null;
+  serverTime: string | null;
+}) {
   const [open, setOpen] = useState<Set<number>>(new Set());
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
@@ -20,11 +33,10 @@ export default function ResaleSection({ matchId, board }: { matchId: number; boa
       return next;
     });
 
-  const buy = (offer: ResaleOffer, label: string) => {
-    if (!window.confirm(`${label} ${yen(offer.price)} + 手数料 ${yen(offer.buyer_fee)} = ${yen(offer.total)} で購入しますか？`)) return;
+  const addToCart = (listingId: number) => {
     setError(null);
     startTransition(async () => {
-      const res = await purchaseListing(offer.id);
+      const res = await holdListing(matchId, listingId);
       // 成功時は redirect されるのでここには来ない
       if (res && !res.ok) setError(resaleErrorMessage(res.error, "purchase"));
     });
@@ -78,11 +90,11 @@ export default function ResaleSection({ matchId, board }: { matchId: number; boa
                       </span>
                       <button
                         type="button"
-                        onClick={() => buy(o, label)}
-                        disabled={pending}
+                        onClick={() => addToCart(o.id)}
+                        disabled={pending || hold !== null}
                         className="rounded bg-blue-600 px-3 py-1 text-white disabled:opacity-50"
                       >
-                        購入
+                        カートに入れる
                       </button>
                     </li>
                   ))}
@@ -105,6 +117,24 @@ export default function ResaleSection({ matchId, board }: { matchId: number; boa
         <p role="alert" className="mb-2 text-sm text-red-600">
           {error}
         </p>
+      )}
+      {hold && serverTime && (
+        <div data-testid="resale-hold" className="mb-3 rounded border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+          <p className="font-semibold">購入手続き中の出品があります</p>
+          <p className="mt-1">
+            {hold.block.stand} {hold.block.code} {hold.seat ? `${hold.seat.row}列 ${hold.seat.number}番` : "自由席"} ・{" "}
+            {hold.ticket_type.name} ・ 合計 {yen(hold.total)}
+          </p>
+          <p className="mt-1">
+            <HoldCountdown expiresAt={hold.expires_at} serverTime={serverTime} />
+          </p>
+          <Link
+            href={`/matches/${matchId}/resale-checkout`}
+            className="mt-2 inline-block rounded bg-blue-600 px-3 py-1 text-white"
+          >
+            決済へ進む
+          </Link>
+        </div>
       )}
       {body}
       {board?.status === "open" && <ResaleViewTracker matchId={matchId} />}

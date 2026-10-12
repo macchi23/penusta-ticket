@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { BlockSeats, CartResponse, MatchPrice, ResaleBoard, SeatMap } from "@/lib/api";
+import type { BlockSeats, CartResponse, MatchPrice, ResaleBoard, ResaleCartResponse, SeatMap } from "@/lib/api";
 import { ApiHttpError, apiGet } from "@/lib/server-api";
 import MatchPurchase from "@/components/MatchPurchase";
 import AutoRefresh from "@/components/AutoRefresh";
@@ -25,7 +25,7 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
   const rawBlock = Array.isArray(sp.block) ? sp.block[0] : sp.block;
   const blockId = rawBlock && /^[1-9][0-9]*$/.test(rawBlock) ? Number(rawBlock) : null;
 
-  const [seatmap, cartRes, pricesRes, seatsRes, boardRes] = await Promise.all([
+  const [seatmap, cartRes, pricesRes, seatsRes, boardRes, resaleCartRes] = await Promise.all([
     apiGet<SeatMap>(`/api/matches/${id}/seatmap`).catch(() => null),
     settle(apiGet<CartResponse>(`/api/matches/${id}/cart`)),
     settle(apiGet<{ data: MatchPrice[] }>(`/api/matches/${id}/prices`)),
@@ -33,6 +33,7 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
       ? settle(apiGet<BlockSeats>(`/api/matches/${id}/blocks/${blockId}/seats`))
       : Promise.resolve(null),
     settle(apiGet<ResaleBoard>(`/api/matches/${id}/resale-listings`)),
+    settle(apiGet<ResaleCartResponse>(`/api/matches/${id}/resale-cart`)),
   ]);
   if (!seatmap || (!cartRes.ok && cartRes.status === 404)) {
     return (
@@ -97,7 +98,12 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
         selectedBlock={selectedBlock}
         blockSeats={blockSeats}
       />
-      <ResaleSection matchId={match.id} board={boardRes.ok ? boardRes.data : null} />
+      <ResaleSection
+        matchId={match.id}
+        board={boardRes.ok ? boardRes.data : null}
+        hold={resaleCartRes.ok ? resaleCartRes.data.hold : null}
+        serverTime={resaleCartRes.ok ? resaleCartRes.data.server_time : null}
+      />
       <AutoRefresh />
       <ViewTracker matchId={match.id} blockCode={selectedBlock?.code} />
     </main>

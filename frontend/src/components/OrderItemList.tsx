@@ -2,12 +2,16 @@ import Link from "next/link";
 import type { OrderItem } from "@/lib/api";
 import { yen } from "@/lib/format";
 
+// 決済前の明細（リセールの仮押さえ）も表示できるよう、注文固有の項目は省略可
+export type OrderItemLike = Pick<OrderItem, "id" | "block" | "seat" | "ticket_type" | "price"> &
+  Partial<Pick<OrderItem, "ticket_id" | "ticket_status" | "resale_payout">>;
+
 export default function OrderItemList({
   items,
   total,
   buyerFee = 0,
 }: {
-  items: OrderItem[];
+  items: OrderItemLike[];
   total: number;
   buyerFee?: number;
 }) {
@@ -24,7 +28,7 @@ export default function OrderItemList({
             <span className="w-20 text-right">{yen(it.price)}</span>
             {it.ticket_status === "resold" && (
               <span className="text-gray-500">
-                リセール済み{it.resale_payout !== null && `（受取 ${yen(it.resale_payout)}）`}
+                リセール済み{it.resale_payout != null && `（受取 ${yen(it.resale_payout)}）`}
               </span>
             )}
             {it.ticket_status === "paid" && (

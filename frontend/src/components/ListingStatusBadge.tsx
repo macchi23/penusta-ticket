@@ -12,9 +12,14 @@ export default function ListingStatusBadge({ ticket }: { ticket: MyTicket }) {
   }
   if (l?.status === "active") {
     return (
-      <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
-        出品中 {yen(l.price)}（受付締切 {formatJst(l.closes_at)}）
-      </span>
+      <>
+        <span className="rounded bg-amber-100 px-2 py-0.5 text-xs text-amber-900">
+          出品中 {yen(l.price)}（受付締切 {formatJst(l.closes_at)}）
+        </span>
+        {l.on_hold && (
+          <span className="rounded bg-blue-100 px-2 py-0.5 text-xs text-blue-900">購入手続き中</span>
+        )}
+      </>
     );
   }
   return null;
