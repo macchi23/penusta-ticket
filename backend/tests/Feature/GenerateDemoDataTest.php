@@ -27,7 +27,7 @@ class GenerateDemoDataTest extends TestCase
     private function fingerprint(): array
     {
         $result = [];
-        foreach (['users', 'memberships', 'season_pass_seats', 'orders', 'tickets', 'order_items', 'events'] as $table) {
+        foreach (['users', 'memberships', 'season_pass_seats', 'orders', 'tickets', 'order_items', 'resale_listings', 'events'] as $table) {
             $result[$table] = DB::selectOne("select count(*) c, md5(coalesce(string_agg(t::text, ',' order by id), '')) h from {$table} t");
         }
 
@@ -82,12 +82,14 @@ class GenerateDemoDataTest extends TestCase
         $this->assertGreaterThanOrEqual('2021-01-01', substr(DB::table('events')->min('occurred_at'), 0, 10));
 
         // 売り越し 0（ブロックごと）、指定席の重複なし
-        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets t join blocks b on b.id = t.block_id group by t.match_id, b.id, b.capacity having count(*) > b.capacity) x')->c);
-        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets where seat_id is not null group by match_id, seat_id having count(*) > 1) x')->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets t join blocks b on b.id = t.block_id where t.status <> \'resold\' group by t.match_id, b.id, b.capacity having count(*) > b.capacity) x')->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets where seat_id is not null and status <> \'resold\' group by match_id, seat_id having count(*) > 1) x')->c);
         // 割当外（buffer / closed）には売らない
         $this->assertSame(0, DB::selectOne("select count(*) c from tickets t join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id where a.allocation not in ('home','away')")->c);
         // 注文の合計は明細の合計、買い手は注文より前に入会している
-        $this->assertSame(0, DB::selectOne('select count(*) c from orders o where o.total <> (select coalesce(sum(price),0) from order_items i where i.order_id = o.id)')->c);
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o where o.kind <> 'resale' and o.total <> (select coalesce(sum(price),0) from order_items i where i.order_id = o.id)")->c);
+        // リセールの注文は 1 枚で、合計 = 明細の価格 + 買い手の手数料
+        $this->assertSame(0, DB::selectOne("select count(*) c from orders o where o.kind = 'resale' and (select count(*) from order_items i where i.order_id = o.id) <> 1")->c);
         $this->assertSame(0, DB::selectOne('select count(*) c from orders o join users u on u.id = o.user_id where o.ordered_at < u.created_at')->c);
 
         // 会員の作成日時は入会より前にしない。行動ログはキックオフ以前
@@ -117,7 +119,7 @@ class GenerateDemoDataTest extends TestCase
         $this->assertGreaterThan(0, DB::selectOne('select count(*) c from order_items where ticket_type_id = ?', [$passTypeId])->c);
         // 引換は 1 ユーザー 1 席、一般販売の券は引換の席に座らない（同じシーズン内）
         $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join tickets t on t.id = i.ticket_id join orders o on o.id = i.order_id join matches m on m.id = t.match_id where i.ticket_type_id = ? and t.seat_id is not null group by m.season_id, t.seat_id having count(distinct o.user_id) > 1) x', [$passTypeId])->c);
-        $this->assertSame(0, DB::selectOne('select count(*) c from order_items gi join tickets gt on gt.id = gi.ticket_id join matches gm on gm.id = gt.match_id where gi.ticket_type_id <> ? and gt.seat_id is not null and exists (select 1 from order_items pi join tickets pt on pt.id = pi.ticket_id join matches pm on pm.id = pt.match_id where pi.ticket_type_id = ? and pt.seat_id = gt.seat_id and pm.season_id = gm.season_id)', [$passTypeId, $passTypeId])->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from order_items gi join orders go on go.id = gi.order_id join tickets gt on gt.id = gi.ticket_id join matches gm on gm.id = gt.match_id where go.kind = \'purchase\' and gi.ticket_type_id <> ? and gt.seat_id is not null and exists (select 1 from order_items pi join tickets pt on pt.id = pi.ticket_id join matches pm on pm.id = pt.match_id where pi.ticket_type_id = ? and pt.seat_id = gt.seat_id and pm.season_id = gm.season_id)', [$passTypeId, $passTypeId])->c);
         // 引換はアウェー割当のブロックには無い。1 ユーザー 1 シーズンで同じブロック・席に固定される
         $this->assertSame(0, DB::selectOne("select count(*) c from order_items i join tickets t on t.id = i.ticket_id join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id where i.ticket_type_id = ? and a.allocation <> 'home'", [$passTypeId])->c);
         $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from order_items i join tickets t on t.id = i.ticket_id join orders o on o.id = i.order_id join matches m on m.id = t.match_id where i.ticket_type_id = ? group by m.season_id, o.user_id having count(distinct t.block_id) > 1 or count(distinct t.seat_id) > 1) x', [$passTypeId])->c);
@@ -242,7 +244,7 @@ class GenerateDemoDataTest extends TestCase
 
         $share = DB::select("select (m.attributes->>'weather') in ('雨','雪') as bad, avg((o.ordered_at >= m.kickoff_at - interval '3 days')::int) as late
             from orders o join matches m on m.id = o.match_id
-            where exists (select 1 from order_items i where i.order_id = o.id and i.ticket_type_id <> ?)
+            where o.kind = 'purchase' and exists (select 1 from order_items i where i.order_id = o.id and i.ticket_type_id <> ?)
             group by 1", [$passTypeId]);
         $byWeather = collect($share)->mapWithKeys(fn ($r) => [$r->bad ? 'bad' : 'fair' => (float) $r->late]);
 
@@ -261,13 +263,13 @@ class GenerateDemoDataTest extends TestCase
         [$goalFixed, $backFixed, $mainFixed] = SeasonPassSeating::split($holders);
 
         // 売り越し 0・席の重複 0
-        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets t join blocks b on b.id = t.block_id group by t.match_id, b.id, b.capacity having count(*) > b.capacity) x')->c);
-        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets where seat_id is not null group by match_id, seat_id having count(*) > 1) x')->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets t join blocks b on b.id = t.block_id where t.status <> \'resold\' group by t.match_id, b.id, b.capacity having count(*) > b.capacity) x')->c);
+        $this->assertSame(0, DB::selectOne('select count(*) c from (select 1 from tickets where seat_id is not null and status <> \'resold\' group by match_id, seat_id having count(*) > 1) x')->c);
 
-        // 一般販売の枚数 + そのシーズンに引換のあったユーザー数（固定席の下限）は capacity 以下。固定枠まで一般販売していれば超える
+        // 一般販売の枚数（年パス券をリセールで買った券は固定席に座るので数えない）+ そのシーズンに引換のあったユーザー数（固定席の下限）は capacity 以下。固定枠まで一般販売していれば超える
         $over = DB::selectOne('select count(*) c from (
             select t.match_id, t.block_id, b.capacity,
-              count(*) filter (where i.ticket_type_id <> ?) as general
+              count(*) filter (where i.ticket_type_id <> ? and t.status <> \'resold\' and not exists (select 1 from resale_listings rl join tickets ot on ot.id = rl.ticket_id where rl.new_ticket_id = t.id and ot.season_pass_seat_id is not null)) as general
             from tickets t join order_items i on i.ticket_id = t.id join blocks b on b.id = t.block_id
             group by t.match_id, t.block_id, b.capacity) g
           join (
@@ -283,7 +285,7 @@ class GenerateDemoDataTest extends TestCase
             select t.match_id, t.block_id, b.capacity, count(*) as general
             from tickets t join order_items i on i.ticket_id = t.id join blocks b on b.id = t.block_id
             join match_block_allocations a on a.match_id = t.match_id and a.block_id = t.block_id
-            where i.ticket_type_id <> ? and a.allocation = 'home' group by t.match_id, t.block_id, b.capacity) g
+            where i.ticket_type_id <> ? and t.status <> 'resold' and not exists (select 1 from resale_listings rl join tickets ot on ot.id = rl.ticket_id where rl.new_ticket_id = t.id and ot.season_pass_seat_id is not null) and a.allocation = 'home' group by t.match_id, t.block_id, b.capacity) g
           where g.general >= g.capacity - ?", [$passTypeId, $maxFixed])->c;
         $this->assertGreaterThan(0, $soldOut);
 
@@ -292,6 +294,119 @@ class GenerateDemoDataTest extends TestCase
             select session_id from events group by session_id
             having bool_or(event_type = 'view_seatmap' and payload->>'block_code' is not null) and not bool_or(event_type = 'purchase')) x")->c;
         $this->assertGreaterThan(0, $abandoned);
+
+        // 完売では定価のままの出品が多く、あふれた買い手がそれを買う（支払額が一次価格以上のリセール購入がある）。リセール込みでも売り越しは 0
+        $absorbed = DB::selectOne("select count(*) c from resale_listings l join blocks b on b.id = l.block_id
+            join match_prices p on p.match_id = l.match_id and p.seat_category_id = b.seat_category_id and p.ticket_type_id = l.ticket_type_id
+            where l.status = 'sold' and l.price + l.buyer_fee >= p.price")->c;
+        $this->assertGreaterThan(0, $absorbed);
+    }
+
+    public function test_resale_is_reproducible(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(2, 0.05);
+        $fingerprint = fn () => [
+            DB::selectOne("select count(*) c, md5(coalesce(string_agg(l::text, ',' order by id), '')) h from resale_listings l"),
+            DB::selectOne("select count(*) c, md5(coalesce(string_agg(o::text, ',' order by id), '')) h from orders o where kind = 'resale'"),
+            DB::selectOne("select count(*) c, md5(coalesce(string_agg(e::text, ',' order by id), '')) h from events e where event_type in ('resale_list','resale_purchase','view_resale')"),
+        ];
+        $first = $fingerprint();
+        $this->assertGreaterThan(100, $first[0]->c);
+        $this->assertGreaterThan(50, $first[1]->c);
+        $this->assertGreaterThan(0, $first[2]->c);
+
+        $this->generate(2, 0.05);
+
+        $this->assertEquals($first, $fingerprint());
+    }
+
+    public function test_resale_rates_and_invariants(): void
+    {
+        $this->seed(DatabaseSeeder::class);
+        $this->generate(3, 0.1);
+        $asOf = DemoScenario::asOf()->format('Y-m-d H:i:sP');
+        $adultId = DB::table('ticket_types')->where('code', 'adult')->value('id');
+        $count = fn (string $sql, array $bindings = []) => DB::selectOne("select count(*) c from ($sql) x", $bindings)->c;
+
+        $this->assertGreaterThan(0, DB::table('resale_listings')->where('status', 'sold')->count());
+        $this->assertGreaterThan(0, DB::table('resale_listings')->where('status', 'expired')->count());
+
+        // 出品率: 年パス券は 1 試合あたり 8〜15% を基準に条件で上がる、通常購入券は 1〜3%。販売した試合の券だけを分母にする
+        $rate = fn (string $kind) => (float) DB::selectOne("select count(distinct l.ticket_id)::float / count(distinct i.ticket_id) r
+            from order_items i join orders o on o.id = i.order_id and o.kind = ?
+            join matches m on m.id = o.match_id and coalesce((m.attributes->>'unsold')::boolean, false) = false
+            left join resale_listings l on l.ticket_id = i.ticket_id", [$kind])->r;
+        $this->assertEqualsWithDelta(0.11, $rate('season_pass'), 0.05);
+        $this->assertEqualsWithDelta(0.017, $rate('purchase'), 0.012);
+
+        // 成約率はおおむね 3〜9 割。値引きが主流（支払額が一次の同席種・同券種の価格より安い）
+        $listings = DB::selectOne("select count(*) n, avg((status = 'sold')::int) sold, avg((l.price + l.buyer_fee < p.price)::int) cheaper
+            from resale_listings l join blocks b on b.id = l.block_id
+            join match_prices p on p.match_id = l.match_id and p.seat_category_id = b.seat_category_id and p.ticket_type_id = l.ticket_type_id
+            where l.status <> 'cancelled'");
+        $this->assertGreaterThan(500, $listings->n);
+        $this->assertGreaterThan(0.3, (float) $listings->sold);
+        $this->assertLessThan(0.9, (float) $listings->sold);
+        $this->assertGreaterThan(0.8, (float) $listings->cheaper);
+
+        $this->assertGreaterThan(0, DB::table('resale_listings')->where('status', 'active')->count());
+        $this->assertGreaterThan(0, DB::table('resale_listings')->where('status', 'cancelled')->count());
+
+        // 席の占有チケットは 1 枚。resold の元チケットには sold の出品がちょうど 1 つ、sold の出品の元チケットは resold
+        $this->assertSame(0, $count("select 1 from tickets where seat_id is not null and status not in ('released','expired','resold') group by match_id, seat_id having count(*) > 1"));
+        $this->assertSame(0, $count("select 1 from tickets t where t.status = 'resold' and (select count(*) from resale_listings l where l.ticket_id = t.id and l.status = 'sold') <> 1"));
+        $this->assertSame(0, $count("select 1 from resale_listings l join tickets t on t.id = l.ticket_id where l.status = 'sold' and t.status <> 'resold'"));
+        $this->assertSame(0, $count("select 1 from resale_listings where status in ('active','sold') group by ticket_id having count(*) > 1"));
+        // 取り下げ: 売れていない・締切の前。同じチケットを、取り下げの後に、より低い価格で出し直している（出し直しは再度は取り下げない）
+        $this->assertSame(0, $count("select 1 from resale_listings c where c.status = 'cancelled' and (c.buyer_order_id is not null or c.updated_at >= (c.closes_at at time zone 'UTC')
+            or not exists (select 1 from resale_listings n where n.ticket_id = c.ticket_id and n.id <> c.id and n.status <> 'cancelled' and n.price < c.price and n.created_at > c.updated_at))"));
+        $this->assertSame(0, $count("select 1 from resale_listings group by ticket_id having count(*) filter (where status = 'cancelled') > 1"));
+
+        // 出品: min_price <= 価格 <= 定価、手数料・payout は ResaleService と同じ式、締切 = キックオフの 150 分前、出品者は元のチケットの持ち主
+        $this->assertSame(0, $count('select 1 from resale_listings where price < 500 or price > face_price or payout < 0 or buyer_fee <> 220'));
+        $this->assertSame(0, $count('select 1 from resale_listings where seller_fee <> round(price * 0.10) or payout <> price - seller_fee - 330'));
+        $this->assertSame(0, $count("select 1 from resale_listings l join matches m on m.id = l.match_id where l.closes_at <> m.kickoff_at - interval '150 minutes'"));
+        $this->assertSame(0, $count("select 1 from resale_listings l join order_items i on i.ticket_id = l.ticket_id join orders o on o.id = i.order_id
+            where o.user_id <> l.seller_user_id or o.kind not in ('purchase','season_pass') or (l.created_at at time zone 'UTC') <= o.ordered_at"));
+        // 年パス券は大人の単券価格の 75%（切り捨て）が定価で買い手の券種は adult、通常購入券は買った価格と券種のまま
+        $this->assertSame(0, $count("select 1 from resale_listings l join order_items i on i.ticket_id = l.ticket_id join orders o on o.id = i.order_id
+            join blocks b on b.id = l.block_id join match_prices p on p.match_id = l.match_id and p.seat_category_id = b.seat_category_id and p.ticket_type_id = ?
+            where o.kind = 'season_pass' and (l.ticket_type_id <> ? or l.face_price <> floor(p.price * 0.75))", [$adultId, $adultId]));
+        $this->assertSame(0, $count("select 1 from resale_listings l join order_items i on i.ticket_id = l.ticket_id join orders o on o.id = i.order_id
+            where o.kind = 'purchase' and (l.ticket_type_id <> i.ticket_type_id or l.face_price <> i.price)"));
+        // 出品は一般販売の開始以降・締切の前・AS_OF 以前。失効は締切が AS_OF 以前、active は締切が AS_OF より後
+        $this->assertSame(0, $count("select 1 from resale_listings l join sale_phases p on p.match_id = l.match_id and p.kind = 'general'
+            where (l.created_at at time zone 'UTC') < p.starts_at or (l.created_at at time zone 'UTC') >= l.closes_at or (l.created_at at time zone 'UTC') > ?::timestamptz", [$asOf]));
+        $this->assertSame(0, $count('select 1 from resale_listings where (status = \'expired\' and closes_at > ?::timestamptz) or (status = \'active\' and closes_at <= ?::timestamptz)', [$asOf, $asOf]));
+
+        // 成約: 出品者以外が買い、締切前・AS_OF 以前。元は resold、新しいチケットは同じ席の paid（年パスの席ではない）、resale の注文 1 件・合計 = 価格 + 手数料
+        $this->assertSame(0, $count("select 1 from resale_listings l join orders bo on bo.id = l.buyer_order_id
+            where l.status = 'sold' and (bo.user_id = l.seller_user_id or bo.kind <> 'resale' or bo.ordered_at >= l.closes_at or bo.ordered_at > ?::timestamptz or bo.total <> l.price + l.buyer_fee or (l.created_at at time zone 'UTC') >= bo.ordered_at)", [$asOf]));
+        $this->assertSame(0, $count("select 1 from resale_listings l join tickets ot on ot.id = l.ticket_id join tickets nt on nt.id = l.new_ticket_id join order_items bi on bi.order_id = l.buyer_order_id
+            where l.status = 'sold' and (nt.status <> 'paid' or nt.match_id <> ot.match_id or nt.block_id <> ot.block_id or nt.seat_id is distinct from ot.seat_id
+              or nt.season_pass_seat_id is not null or nt.qr_uuid = ot.qr_uuid or bi.ticket_id <> nt.id or bi.price <> l.price or bi.ticket_type_id <> l.ticket_type_id)"));
+        $this->assertSame(0, $count("select 1 from resale_listings where (status = 'sold') <> (buyer_order_id is not null and new_ticket_id is not null)"));
+        $this->assertSame(DB::table('resale_listings')->where('status', 'sold')->count(), DB::table('orders')->where('kind', 'resale')->count());
+        // リセールで買った券は再出品されない。1 ユーザー 1 試合のリセール購入は 6 枚まで
+        $this->assertSame(0, $count("select 1 from resale_listings l join order_items i on i.ticket_id = l.ticket_id join orders o on o.id = i.order_id where o.kind = 'resale'"));
+        $this->assertSame(0, $count("select 1 from orders where kind = 'resale' group by user_id, match_id having count(*) > 6"));
+
+        // イベント: 出品・成約と 1 対 1（本番と同じ payload）。成約したユーザーは view_resale を残している
+        $this->assertSame(0, $count("select 1 from resale_listings l left join events e on e.event_type = 'resale_list' and (e.payload->>'listing_id')::bigint = l.id
+            and e.user_id = l.seller_user_id and e.occurred_at = (l.created_at at time zone 'UTC') and (e.payload->>'match_id')::bigint = l.match_id and (e.payload->>'block_id')::bigint = l.block_id
+            and (e.payload->>'price')::int = l.price and e.payload->>'source' in ('purchase','season_pass') where e.id is null"));
+        $this->assertSame(0, $count("select 1 from resale_listings l join orders bo on bo.id = l.buyer_order_id left join events e on e.event_type = 'resale_purchase'
+            and (e.payload->>'listing_id')::bigint = l.id and (e.payload->>'order_id')::bigint = bo.id and e.user_id = bo.user_id and e.occurred_at = bo.ordered_at
+            and (e.payload->>'total')::int = bo.total and abs((e.payload->>'discount_rate')::numeric - (1 - l.price::numeric / l.face_price)) < 0.0011 where e.id is null"));
+        $this->assertSame(DB::table('resale_listings')->count(), DB::table('events')->where('event_type', 'resale_list')->count());
+        $this->assertSame(0, $count("select 1 from resale_listings l left join events e on e.event_type = 'resale_cancel' and (e.payload->>'listing_id')::bigint = l.id
+            and e.user_id = l.seller_user_id and (e.payload->>'match_id')::bigint = l.match_id and e.occurred_at = (l.updated_at at time zone 'UTC')
+            where l.status = 'cancelled' and e.id is null"));
+        $this->assertSame(DB::table('resale_listings')->where('status', 'cancelled')->count(), DB::table('events')->where('event_type', 'resale_cancel')->count());
+        $this->assertSame(DB::table('resale_listings')->where('status', 'sold')->count(), DB::table('events')->where('event_type', 'resale_purchase')->count());
+        $this->assertGreaterThan(0, DB::table('events')->where('event_type', 'view_resale')->count());
+        $this->assertSame(0, $count("select 1 from events e where e.event_type = 'view_resale' and e.occurred_at > ?::timestamptz", [$asOf]));
     }
 
     public function test_standing_before_a_match_is_the_previous_rounds_row(): void
@@ -351,6 +466,13 @@ class GenerateDemoDataTest extends TestCase
         foreach ($targets as $matchId) {
             $ticketIds = DB::table('tickets')->where('match_id', $matchId)->whereNotNull('season_pass_seat_id')->pluck('id')->all();
             $this->assertNotEmpty($ticketIds);
+            // 年パス券をリセールで買った券（同じ席に座っている）も、出品ごと消す
+            $resale = DB::table('resale_listings')->whereIn('ticket_id', $ticketIds)->whereNotNull('new_ticket_id')->get(['new_ticket_id', 'buyer_order_id']);
+            $resaleOrderIds = $resale->pluck('buyer_order_id')->all();
+            DB::table('order_items')->whereIn('order_id', $resaleOrderIds)->delete();
+            DB::table('resale_listings')->whereIn('ticket_id', $ticketIds)->delete();
+            DB::table('tickets')->whereIn('id', $resale->pluck('new_ticket_id')->all())->delete();
+            DB::table('orders')->whereIn('id', $resaleOrderIds)->delete();
             $orderIds = DB::table('order_items')->whereIn('ticket_id', $ticketIds)->pluck('order_id')->all();
             DB::table('order_items')->whereIn('ticket_id', $ticketIds)->delete();
             DB::table('tickets')->whereIn('id', $ticketIds)->delete();

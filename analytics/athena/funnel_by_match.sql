@@ -1,5 +1,6 @@
 -- 試合別ファネル（セッション単位）。s1〜s4 は順序不問の到達数、s4_purchase_ordered は前ステップ以降の最初の時刻で辿れたもの。
--- 最後の行（is_total）が全体合計。Athena (Trino) 用。{{source}} は scripts/aws-analytics.sh が置換する（events_curated はそのまま、
+-- 最後の行（is_total）が全体合計。リセールで買ったセッション（resale_purchase を含む）は一次販売のファネルではないので除く。
+-- Athena (Trino) 用。{{source}} は scripts/aws-analytics.sh が置換する（events_curated はそのまま、
 -- events_raw は match_id の取り出しと occurred_at の timestamp 化をした正規化サブクエリ）。
 WITH events_clean AS (
   SELECT * FROM {{source}}
@@ -13,6 +14,7 @@ WITH events_clean AS (
   FROM events_clean
   WHERE match_id IS NOT NULL
   GROUP BY session_id, match_id
+  HAVING count(*) FILTER (WHERE event_type = 'resale_purchase') = 0
 ), o1 AS (
   SELECT session_id, match_id, a1, a2, a3, a4, a1 AS t1 FROM any_t
 ), o2 AS (

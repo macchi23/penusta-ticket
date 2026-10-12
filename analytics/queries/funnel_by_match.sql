@@ -1,5 +1,5 @@
 -- 試合別ファネル（セッション単位）。s1〜s4 は順序不問の到達数、s4_purchase_ordered は前ステップ以降の最初の時刻で辿れたもの。
--- 最後の行（is_total）が全体合計。
+-- 最後の行（is_total）が全体合計。リセールで買ったセッション（resale_purchase を含む）は一次販売のファネルではないので除く。
 WITH any_t AS (
   SELECT session_id, match_id,
     min(occurred_at) FILTER (WHERE event_type = 'view_match')   AS a1,
@@ -9,6 +9,7 @@ WITH any_t AS (
   FROM events_clean
   WHERE match_id IS NOT NULL
   GROUP BY session_id, match_id
+  HAVING count(*) FILTER (WHERE event_type = 'resale_purchase') = 0
 ), o1 AS (
   SELECT session_id, match_id, a1, a2, a3, a4, a1 AS t1 FROM any_t
 ), o2 AS (

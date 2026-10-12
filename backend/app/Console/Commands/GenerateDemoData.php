@@ -50,6 +50,20 @@ class GenerateDemoData extends Command
 
     public function handle(DemandModel $demand): int
     {
+        // 循環参照を作らない処理で、行や出品の配列・オブジェクトを大量に作り捨てる。GC を走らせても回収できず、
+        // 回収が空振りするたびに閾値が上がって、同じプロセスの後続の処理（テスト）に未回収のゴミが溜まるので止めておく。
+        // 先に溜まっているゴミ（前のテストのアプリ等）は止める前に回収する
+        gc_collect_cycles();
+        gc_disable();
+        try {
+            return $this->generateAll($demand);
+        } finally {
+            gc_enable();
+        }
+    }
+
+    private function generateAll(DemandModel $demand): int
+    {
         $seasonCount = (int) $this->option('seasons');
         $scale = (float) $this->option('scale');
         $seed = (int) $this->option('seed');
@@ -123,31 +137,37 @@ class GenerateDemoData extends Command
                 );
                 // 年パスの固定席は未販売の試合にも発行する（アプリの SeasonPassIssuer が全試合に発行するのと同じ）
                 $generator->issuePasses($context);
-                if ($this->isUnsold($match)) {
-                    continue;
+                if (! $this->isUnsold($match)) {
+                    $generator->generate(
+                        $context,
+                        $this->allocatedBlocks($match->id, $blocks),
+                        $seatIds,
+                        $prices,
+                    );
+                    $matches++;
                 }
-                $generator->generate(
-                    $context,
-                    $this->allocatedBlocks($match->id, $blocks),
-                    $seatIds,
-                    $prices,
-                );
-                $matches++;
+                // チケットと出品は試合の終わりにまとめて書く（リセールの成約で書き換わるため）
+                $generator->commitMatch();
             }
             $sink->flush();
-            $this->line(sprintf('  %s: %d 試合', $span->definition->name, $matches));
+            $resale = $generator->stats();
+            $this->line(sprintf(
+                '  %s: %d 試合（リセール 出品 %d（うち値下げの再出品 %d） / 成約 %d、うち一次から流れた %d / あふれの吸収 %d）',
+                $span->definition->name, $matches, $resale['listed'], $resale['relisted'], $resale['sold'], $resale['cannibalized'], $resale['absorbed'],
+            ));
         }
 
         $this->finish();
 
         $this->info(sprintf(
-            '完了しました（%.1f 秒）。users %d / memberships %d / season_pass_seats %d / orders %d / tickets %d / events %d',
+            '完了しました（%.1f 秒）。users %d / memberships %d / season_pass_seats %d / orders %d / tickets %d / resale_listings %d / events %d',
             microtime(true) - $started,
             $sink->count('users'),
             $sink->count('memberships'),
             $sink->count('season_pass_seats'),
             $sink->count('orders'),
             $sink->count('tickets'),
+            $sink->count('resale_listings'),
             $sink->count('events'),
         ));
 
@@ -177,10 +197,10 @@ class GenerateDemoData extends Command
 
     private function finish(): void
     {
-        foreach (['users', 'orders', 'tickets', 'season_pass_seats'] as $table) {
+        foreach (['users', 'orders', 'tickets', 'season_pass_seats', 'resale_listings'] as $table) {
             $this->resetSequence($table);
         }
-        DB::statement('ANALYZE users, memberships, season_pass_seats, orders, tickets, order_items, events');
+        DB::statement('ANALYZE users, memberships, season_pass_seats, orders, tickets, order_items, resale_listings, events');
     }
 
     /** @return list<SeasonSpan> 古い順 */

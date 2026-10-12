@@ -67,8 +67,8 @@ class ResaleService
                 throw ResaleException::priceOutOfRange($min, $facePrice);
             }
 
-            $sellerFee = (int) round(round($price * (float) config('ticketing.resale.seller_fee_rate'), 6));
-            $payout = $price - $sellerFee - (int) config('ticketing.resale.transfer_fee');
+            $sellerFee = self::sellerFee($price);
+            $payout = self::payout($price);
             if ($payout < 0) {
                 throw ResaleException::priceOutOfRange($min, $facePrice);
             }
@@ -132,7 +132,7 @@ class ResaleService
      *
      * @return array{0: int, 1: int}|null [定価, 買い手の券種 id]
      */
-    public function listingFacePrice(OrderKind $kind, int $itemPrice, int $itemTypeId, ?int $singleAdultPrice, ?int $adultTypeId): ?array
+    public static function listingFacePrice(OrderKind $kind, int $itemPrice, int $itemTypeId, ?int $singleAdultPrice, ?int $adultTypeId): ?array
     {
         if ($kind === OrderKind::Purchase) {
             return [$itemPrice, $itemTypeId];
@@ -143,6 +143,18 @@ class ResaleService
         $rate = (float) config('ticketing.resale.season_pass_discount_rate');
 
         return [(int) floor(round($singleAdultPrice * (1 - $rate), 6)), $adultTypeId];
+    }
+
+    /** 出品者の手数料（円）。デモデータ生成器も同じ式を使う */
+    public static function sellerFee(int $price): int
+    {
+        return (int) round(round($price * (float) config('ticketing.resale.seller_fee_rate'), 6));
+    }
+
+    /** 出品者への振込額 = 価格 − 出品者手数料 − 振込手数料。負なら出品できない価格 */
+    public static function payout(int $price): int
+    {
+        return $price - self::sellerFee($price) - (int) config('ticketing.resale.transfer_fee');
     }
 
     /**
