@@ -22,10 +22,18 @@ class ResaleWindow
 
     public function isOpen(FootballMatch $match, CarbonImmutable $now): bool
     {
-        if ($match->status !== 'on_sale' || $now >= $this->closesAt($match)) {
-            return false;
-        }
+        return $this->beforeDeadline($match, $now) && $this->hasStarted($match, $now);
+    }
 
+    /** 試合が on_sale で、締切前か。 */
+    private function beforeDeadline(FootballMatch $match, CarbonImmutable $now): bool
+    {
+        return $match->status === 'on_sale' && $now < $this->closesAt($match);
+    }
+
+    /** 一般販売フェーズが始まっているか。 */
+    private function hasStarted(FootballMatch $match, CarbonImmutable $now): bool
+    {
         // general フェーズは eligibility が null(誰でも買える)前提なので、資格は見ない
         return SalePhase::where('match_id', $match->id)
             ->where('kind', SalePhaseKind::General->value)
@@ -37,6 +45,33 @@ class ResaleWindow
     public function canView(?User $user, FootballMatch $match, CarbonImmutable $now): bool
     {
         return $user !== null && $this->isOpen($match, $now);
+    }
+
+    /** 一般販売フェーズの開始（リセールの開始）。フェーズが無ければ null。 */
+    public function opensAt(FootballMatch $match): ?CarbonImmutable
+    {
+        $start = SalePhase::where('match_id', $match->id)
+            ->where('kind', SalePhaseKind::General->value)
+            ->min('starts_at');
+
+        return $start === null ? null : CarbonImmutable::parse($start, 'UTC');
+    }
+
+    /**
+     * 一覧の表示状態。open は canView と同値。
+     *
+     * @return 'open'|'login_required'|'not_started'|'closed'
+     */
+    public function boardStatus(?User $user, FootballMatch $match, CarbonImmutable $now): string
+    {
+        if ($user === null) {
+            return 'login_required';
+        }
+        if (! $this->beforeDeadline($match, $now)) {
+            return 'closed';
+        }
+
+        return $this->hasStarted($match, $now) ? 'open' : 'not_started';
     }
 
     /** @throws ResaleException */

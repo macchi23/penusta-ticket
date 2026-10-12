@@ -26,6 +26,8 @@ return [
         'seller_fee_rate' => (float) env('TICKETING_RESALE_SELLER_FEE_RATE', 0.10),
         'transfer_fee' => (int) env('TICKETING_RESALE_TRANSFER_FEE', 330),
         'buyer_fee' => (int) env('TICKETING_RESALE_BUYER_FEE', 220),
+        // 購入時のロック待ちの上限（ミリ秒）。超えたら listing_unavailable
+        'lock_timeout_ms' => (int) env('TICKETING_RESALE_LOCK_TIMEOUT_MS', 2500),
         // キックオフの何分前にリセールを締め切るか
         'close_minutes_before_kickoff' => (int) env('TICKETING_RESALE_CLOSE_MINUTES', 150),
         // 年パス券の定価 = 単券の大人価格 × (1 - この率)

@@ -44,6 +44,7 @@ function reducer(state: CartResponse | null, action: OptimisticAction): CartResp
     expires_at: null,
     ordered_at: null,
     total: 0,
+    buyer_fee: 0,
     items: [],
   };
   let items = base.items;
@@ -74,6 +75,8 @@ function reducer(state: CartResponse | null, action: OptimisticAction): CartResp
           seat_category: block.seat_category,
           ticket_type: p?.ticket_type ?? { id: q.ticket_type_id, code: "", name: "" },
           price: p?.price ?? 0,
+          ticket_status: "held",
+          resale_payout: null,
         }));
         added += extra.length;
         next = [...next, ...extra];
@@ -187,6 +190,8 @@ export default function MatchPurchase({
       seat_category: block.seat_category,
       ticket_type: p?.ticket_type ?? { id: 0, code: "", name: "" },
       price: p?.price ?? 0,
+      ticket_status: "held",
+      resale_payout: null,
     };
   }
 

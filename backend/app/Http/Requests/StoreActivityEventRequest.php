@@ -15,7 +15,7 @@ class StoreActivityEventRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'type' => ['required', 'string', Rule::in(['view_match', 'view_seatmap'])],
+            'type' => ['required', 'string', Rule::in(['view_match', 'view_seatmap', 'view_resale'])],
             'match_id' => ['required', 'integer', 'min:1', 'exists:matches,id'],
             'block_code' => ['nullable', 'string', 'max:20', 'regex:/^[A-Za-z0-9_-]+$/', 'exists:blocks,code'],
         ];

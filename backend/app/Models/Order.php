@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class Order extends Model
 {
@@ -49,6 +50,12 @@ class Order extends Model
     public function salePhase(): BelongsTo
     {
         return $this->belongsTo(SalePhase::class);
+    }
+
+    /** kind = resale の注文が買った出品 */
+    public function resaleListing(): HasOne
+    {
+        return $this->hasOne(ResaleListing::class, 'buyer_order_id');
     }
 
     public function items(): HasMany

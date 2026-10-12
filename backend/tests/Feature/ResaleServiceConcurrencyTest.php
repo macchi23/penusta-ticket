@@ -19,7 +19,6 @@ use App\Models\User;
 use App\Services\Resale\ResaleService;
 use Carbon\CarbonImmutable;
 use Closure;
-use Illuminate\Database\QueryException;
 use Illuminate\Foundation\Testing\DatabaseTruncation;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
@@ -55,6 +54,7 @@ class ResaleServiceConcurrencyTest extends TestCase
     {
         parent::setUp();
         $this->travelTo(CarbonImmutable::parse('2030-02-01 00:00:00', 'UTC'));
+        config(['ticketing.resale.lock_timeout_ms' => 200]);
 
         $this->buildSaleFixture();
         $this->reserved = $this->makeBlock('M1', 'reserved', 20);
@@ -197,18 +197,17 @@ class ResaleServiceConcurrencyTest extends TestCase
         $blocked = null;
         $this->beforeLock('tickets', function () use ($seventh, &$blocked) {
             $this->onProbe(function () use ($seventh, &$blocked) {
-                DB::statement("SET lock_timeout = '200ms'");
                 try {
                     $this->service()->purchase($this->bob, $seventh);
-                } catch (QueryException $e) {
-                    $blocked = $e->getCode();
+                } catch (ResaleException $e) {
+                    $blocked = $e->errorCode;
                 }
             });
         });
 
         $this->service()->purchase($this->bob, $sixth);
 
-        $this->assertSame('55P03', $blocked, '同じ buyer の並行購入は advisory lock で待たされる');
+        $this->assertSame('listing_unavailable', $blocked, '同じ buyer の並行購入は advisory lock で待たされる');
         $this->assertSame(ResaleListingStatus::Active, $seventh->fresh()->status);
         $this->assertResale('resale_limit_reached', fn () => $this->service()->purchase($this->bob, $seventh));
         $this->assertSame(6, OrderItem::whereIn('order_id', Order::where('kind', 'resale')->where('user_id', $this->bob->id)->select('id'))->count());
@@ -221,11 +220,10 @@ class ResaleServiceConcurrencyTest extends TestCase
         $waited = null;
         $this->beforeLock('tickets', function () use ($b, &$waited) {
             $this->onProbe(function () use ($b, &$waited) {
-                DB::statement("SET lock_timeout = '200ms'");
                 try {
                     $this->service()->purchase($this->carol, $b);
                     $waited = false;
-                } catch (QueryException) {
+                } catch (ResaleException) {
                     $waited = true;
                 }
             });
@@ -242,14 +240,9 @@ class ResaleServiceConcurrencyTest extends TestCase
         $probe = $this->probeConnection();
         $probe->beginTransaction();
         $probe->select('select id from tickets where id = ? for update', [$listing->ticket_id]);
-        DB::statement("SET lock_timeout = '200ms'");
 
-        try {
-            $this->service()->purchase($this->bob, $listing);
-            $this->fail('待たされるはずが成功した');
-        } catch (QueryException $e) {
-            $this->assertSame('55P03', $e->getCode());
-        }
+        // SET LOCAL lock_timeout が効いて、待たされたら listing_unavailable に変換される
+        $this->assertResale('listing_unavailable', fn () => $this->service()->purchase($this->bob, $listing));
     }
 
     public function test_lock_order_is_ticket_then_listing_and_never_allocation(): void

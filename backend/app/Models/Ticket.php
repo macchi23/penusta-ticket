@@ -24,6 +24,9 @@ class Ticket extends Model
         'expires_at',
     ];
 
+    /** 入場用の QR。モデルが直接シリアライズされても出さない（専用の Resource だけが明示的に出す） */
+    protected $hidden = ['qr_uuid'];
+
     protected function casts(): array
     {
         return [
@@ -64,6 +67,11 @@ class Ticket extends Model
     public function seasonPassSeat(): BelongsTo
     {
         return $this->belongsTo(SeasonPassSeat::class);
+    }
+
+    public function resaleListings(): HasMany
+    {
+        return $this->hasMany(ResaleListing::class);
     }
 
     public function orderItems(): HasMany

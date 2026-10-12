@@ -10,7 +10,11 @@ use App\Http\Controllers\Api\DemoUserController;
 use App\Http\Controllers\Api\HealthController;
 use App\Http\Controllers\Api\MatchController;
 use App\Http\Controllers\Api\MatchPriceController;
+use App\Http\Controllers\Api\MyTicketController;
 use App\Http\Controllers\Api\OrderController;
+use App\Http\Controllers\Api\ResaleBoardController;
+use App\Http\Controllers\Api\ResalePurchaseController;
+use App\Http\Controllers\Api\TicketListingController;
 use Illuminate\Support\Facades\Route;
 
 Route::get('/health', [HealthController::class, 'index']);
@@ -33,6 +37,17 @@ Route::post('/orders/{order}/checkout', [CheckoutController::class, 'store'])
     ->middleware(['auth:demo', 'throttle:cart'])->whereNumber('order');
 Route::get('/orders/{order}', [OrderController::class, 'show'])
     ->middleware('auth:demo')->whereNumber('order');
+
+// マイチケットとリセール。他人の券は 404。一覧(GET)は throttle しない
+Route::get('/me/tickets', [MyTicketController::class, 'index'])->middleware('auth:demo');
+Route::get('/tickets/{ticket}', [MyTicketController::class, 'show'])->middleware('auth:demo')->whereNumber('ticket');
+Route::middleware(['auth:demo', 'throttle:cart'])->group(function () {
+    Route::post('/tickets/{ticket}/listing', [TicketListingController::class, 'store'])->whereNumber('ticket');
+    Route::delete('/tickets/{ticket}/listing', [TicketListingController::class, 'destroy'])->whereNumber('ticket');
+    Route::post('/resale-listings/{listing}/purchase', [ResalePurchaseController::class, 'store'])->whereNumber('listing');
+});
+// 任意認証(ゲストには login_required を返す)
+Route::get('/matches/{match}/resale-listings', [ResaleBoardController::class, 'index']);
 
 // 任意認証（ログインしていれば user_id を記録する）
 Route::post('/events', [ActivityEventController::class, 'store'])->middleware('throttle:events');

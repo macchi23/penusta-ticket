@@ -49,20 +49,13 @@ class ResaleService
             $locked = Ticket::whereKey($ticket->id)->lockForUpdate()->first() ?? throw ResaleException::notOwner();
 
             $order = $this->ownerOrder($locked);
-            if ($order === null || $order->user_id !== $seller->id) {
-                throw ResaleException::notOwner();
-            }
-            if ($locked->status !== TicketStatus::Paid || $order->kind === OrderKind::Resale) {
-                throw ResaleException::notListable();
-            }
 
             // ロック待ちの間に締切を跨ぎうるので、時刻はロック取得後に取る
             $now = CarbonImmutable::now();
             $match = FootballMatch::findOrFail($locked->match_id);
-            $this->window->assertOpen($match, $now);
-
-            if (ResaleListing::where('ticket_id', $locked->id)->where('status', ResaleListingStatus::Active->value)->exists()) {
-                throw ResaleException::notListable('このチケットはすでに出品中です。');
+            $hasActive = ResaleListing::where('ticket_id', $locked->id)->where('status', ResaleListingStatus::Active->value)->exists();
+            if ($blocker = $this->listBlocker($seller, $locked, $order, $hasActive, $this->window->isOpen($match, $now))) {
+                throw $blocker;
             }
 
             [$facePrice, $ticketTypeId] = $this->facePrice($locked, $order, $match);
@@ -106,6 +99,53 @@ class ResaleService
     }
 
     /**
+     * 出品できない理由（できるなら null）。DB を読まない純関数で、list() の検証と API の can_list が同じものを使う。
+     * 定価の下限は facePrice 側で見る（listingFacePrice）。
+     */
+    public function listBlocker(User $user, Ticket $ticket, ?Order $ownerOrder, bool $hasActiveListing, bool $windowOpen): ?ResaleException
+    {
+        if ($ownerOrder === null || $ownerOrder->user_id !== $user->id) {
+            return ResaleException::notOwner();
+        }
+        if ($ticket->status !== TicketStatus::Paid || $ownerOrder->kind === OrderKind::Resale) {
+            return ResaleException::notListable();
+        }
+        if (! $windowOpen) {
+            return ResaleException::closed();
+        }
+        if ($hasActiveListing) {
+            return ResaleException::notListable('このチケットはすでに出品中です。');
+        }
+
+        return null;
+    }
+
+    /** 取り下げられるか。active なら期間外(締切後で失効前、on_sale 以外)でも可。cancel() の検証と API の can_cancel が共有する。 */
+    public function canCancel(ResaleListingStatus $status): bool
+    {
+        return $status === ResaleListingStatus::Active;
+    }
+
+    /**
+     * 出品の定価と買い手の券種 id。年パス券は単券の大人価格から割り引く。
+     * 算出できない（価格や大人券種が無い）ときは null。
+     *
+     * @return array{0: int, 1: int}|null [定価, 買い手の券種 id]
+     */
+    public function listingFacePrice(OrderKind $kind, int $itemPrice, int $itemTypeId, ?int $singleAdultPrice, ?int $adultTypeId): ?array
+    {
+        if ($kind === OrderKind::Purchase) {
+            return [$itemPrice, $itemTypeId];
+        }
+        if ($singleAdultPrice === null || $adultTypeId === null) {
+            return null;
+        }
+        $rate = (float) config('ticketing.resale.season_pass_discount_rate');
+
+        return [(int) floor(round($singleAdultPrice * (1 - $rate), 6)), $adultTypeId];
+    }
+
+    /**
      * @throws ResaleException
      */
     public function cancel(User $seller, ResaleListing $listing): ResaleListing
@@ -121,7 +161,7 @@ class ResaleService
             if ($locked->seller_user_id !== $seller->id) {
                 throw ResaleException::notOwner();
             }
-            if ($locked->status !== ResaleListingStatus::Active) {
+            if (! $this->canCancel($locked->status)) {
                 throw ResaleException::listingUnavailable();
             }
 
@@ -139,7 +179,23 @@ class ResaleService
      */
     public function purchase(User $buyer, ResaleListing $listing): ResaleListing
     {
+        try {
+            return $this->purchaseInTransaction($buyer, $listing);
+        } catch (QueryException $e) {
+            // 行ロック・advisory lock の待ちがタイムアウトした = 他の人が同じ出品を処理中
+            if ($e->getCode() === '55P03') {
+                throw ResaleException::listingUnavailable();
+            }
+            throw $e;
+        }
+    }
+
+    private function purchaseInTransaction(User $buyer, ResaleListing $listing): ResaleListing
+    {
         return DB::transaction(function () use ($buyer, $listing) {
+            // ロック待ちを長引かせない。行ロックにも pg_advisory_xact_lock にも効く（トランザクション終了で元に戻る）
+            DB::statement(sprintf("SET LOCAL lock_timeout = '%dms'", (int) config('ticketing.resale.lock_timeout_ms')));
+
             $head = ResaleListing::whereKey($listing->id)->first(['id', 'ticket_id', 'match_id'])
                 ?? throw ResaleException::listingUnavailable();
 
@@ -252,19 +308,18 @@ class ResaleService
     {
         $item = OrderItem::where('order_id', $order->id)->where('ticket_id', $ticket->id)->firstOrFail();
 
-        if ($order->kind === OrderKind::Purchase) {
-            return [$item->price, $item->ticket_type_id];
+        $adultId = null;
+        $single = null;
+        if ($order->kind !== OrderKind::Purchase) {
+            $adultId = TicketType::where('code', 'adult')->value('id')
+                ?? throw ResaleException::notListable('大人の券種が設定されていません。');
+            $single = MatchPrice::where('match_id', $match->id)
+                ->where('seat_category_id', $ticket->block->seat_category_id)
+                ->where('ticket_type_id', $adultId)
+                ->value('price') ?? throw ResaleException::notListable('価格が設定されていません。');
         }
 
-        $adultId = TicketType::where('code', 'adult')->value('id')
-            ?? throw ResaleException::notListable('大人の券種が設定されていません。');
-        $block = $ticket->block;
-        $single = MatchPrice::where('match_id', $match->id)
-            ->where('seat_category_id', $block->seat_category_id)
-            ->where('ticket_type_id', $adultId)
-            ->value('price') ?? throw ResaleException::notListable('価格が設定されていません。');
-        $rate = (float) config('ticketing.resale.season_pass_discount_rate');
-
-        return [(int) floor(round($single * (1 - $rate), 6)), $adultId];
+        return $this->listingFacePrice($order->kind, $item->price, $item->ticket_type_id, $single, $adultId)
+            ?? throw ResaleException::notListable('価格が設定されていません。');
     }
 }
