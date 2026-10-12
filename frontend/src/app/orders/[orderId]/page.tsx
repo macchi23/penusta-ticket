@@ -40,12 +40,14 @@ export default async function OrderPage(props: PageProps<"/orders/[orderId]">) {
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-8">
-      <h1 className="text-2xl font-bold">購入が完了しました</h1>
+      <h1 className="text-2xl font-bold">
+        {order.kind === "resale" ? "リセール購入が完了しました" : "購入が完了しました"}
+      </h1>
       <p className="mt-2 text-sm text-gray-500">
         注文番号 {order.id} ・ 確定 {orderedAt}
       </p>
       <section className="mt-4 rounded-lg border border-gray-200 p-4 dark:border-gray-700">
-        <OrderItemList items={order.items} total={order.total} />
+        <OrderItemList items={order.items} total={order.total} buyerFee={order.buyer_fee} />
       </section>
       <Link href="/" className="mt-6 inline-block text-blue-600 underline">
         試合一覧へ

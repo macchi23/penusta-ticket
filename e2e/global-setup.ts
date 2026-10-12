@@ -14,7 +14,7 @@ export default async function globalSetup(): Promise<void> {
   // dev の初回コンパイルを済ませておく
   const matchId = await pickOnSaleMatch();
   const blockId = await pickReservedBlock(matchId);
-  for (const path of [`/matches/${matchId}?block=${blockId}`, `/matches/${matchId}/checkout`, '/orders/1']) {
+  for (const path of [`/matches/${matchId}?block=${blockId}`, `/matches/${matchId}/checkout`, '/orders/1', '/tickets', '/tickets/1']) {
     await fetch(`${FRONT}${path}`);
   }
 

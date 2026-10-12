@@ -32,6 +32,11 @@ export default async function DemoUserBar() {
       <span>
         <span className="mr-2 font-semibold">DEV</span>
         {current ? current.name : "ユーザー未選択"}
+        {current && (
+          <Link href="/tickets" className="ml-3 underline">
+            マイチケット
+          </Link>
+        )}
         {current?.role === "admin" && (
           <Link href="/admin" className="ml-3 underline">
             管理画面

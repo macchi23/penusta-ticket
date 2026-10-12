@@ -20,3 +20,13 @@ export async function recordView(matchId: number, blockCode?: string): Promise<v
     // 無視
   }
 }
+
+// リセール欄の閲覧ログ。recordView と同じく失敗は無視
+export async function recordResaleView(matchId: number): Promise<void> {
+  if (!isId(matchId)) return;
+  try {
+    await apiCall("POST", "/api/events", { type: "view_resale", match_id: matchId });
+  } catch {
+    // 無視
+  }
+}

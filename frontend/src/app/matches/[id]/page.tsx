@@ -1,10 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import type { BlockSeats, CartResponse, MatchPrice, SeatMap } from "@/lib/api";
+import type { BlockSeats, CartResponse, MatchPrice, ResaleBoard, SeatMap } from "@/lib/api";
 import { ApiHttpError, apiGet } from "@/lib/server-api";
 import MatchPurchase from "@/components/MatchPurchase";
 import AutoRefresh from "@/components/AutoRefresh";
 import ViewTracker from "@/components/ViewTracker";
+import ResaleSection from "@/components/ResaleSection";
 
 type Settled<T> = { ok: true; data: T } | { ok: false; status: number };
 
@@ -24,13 +25,14 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
   const rawBlock = Array.isArray(sp.block) ? sp.block[0] : sp.block;
   const blockId = rawBlock && /^[1-9][0-9]*$/.test(rawBlock) ? Number(rawBlock) : null;
 
-  const [seatmap, cartRes, pricesRes, seatsRes] = await Promise.all([
+  const [seatmap, cartRes, pricesRes, seatsRes, boardRes] = await Promise.all([
     apiGet<SeatMap>(`/api/matches/${id}/seatmap`).catch(() => null),
     settle(apiGet<CartResponse>(`/api/matches/${id}/cart`)),
     settle(apiGet<{ data: MatchPrice[] }>(`/api/matches/${id}/prices`)),
     blockId
       ? settle(apiGet<BlockSeats>(`/api/matches/${id}/blocks/${blockId}/seats`))
       : Promise.resolve(null),
+    settle(apiGet<ResaleBoard>(`/api/matches/${id}/resale-listings`)),
   ]);
   if (!seatmap || (!cartRes.ok && cartRes.status === 404)) {
     return (
@@ -95,6 +97,7 @@ export default async function MatchPage(props: PageProps<"/matches/[id]">) {
         selectedBlock={selectedBlock}
         blockSeats={blockSeats}
       />
+      <ResaleSection matchId={match.id} board={boardRes.ok ? boardRes.data : null} />
       <AutoRefresh />
       <ViewTracker matchId={match.id} blockCode={selectedBlock?.code} />
     </main>

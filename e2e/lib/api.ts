@@ -265,3 +265,58 @@ export async function pickBlockOf(matchId: number, type: 'reserved' | 'unreserve
   if (!b) throw new Error(`${type} のブロックがない`);
   return b.id;
 }
+
+// リセールの E2E 用。キックオフが十分先（締切の 150 分前を過ぎない）で、一般販売中の on_sale の試合
+export async function pickResaleMatch(): Promise<number> {
+  const { data } = await getJson<{
+    data: { id: number; status: string; kickoff_at: string; sale_phases: { kind: string; starts_at: string; ends_at: string }[] }[];
+  }>(undefined, '/api/matches');
+  const now = Date.now();
+  const m = data.find(
+    (x) =>
+      x.status === 'on_sale' &&
+      Date.parse(x.kickoff_at) > now + 150 * 60_000 + HOUR &&
+      x.sale_phases.some((p) => p.kind === 'general' && Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at)),
+  );
+  if (!m) throw new Error('リセールを試せる試合がない（一般販売中で、キックオフが 3.5 時間以上先の on_sale）');
+  return m.id;
+}
+
+export type MyTicketLite = {
+  id: number;
+  source: string;
+  status: string;
+  match: { id: number };
+  block: { id: number; code: string };
+  seat: { id: number; row: string; number: number } | null;
+};
+
+export async function getMyTickets(userId: number): Promise<MyTicketLite[]> {
+  return (await getJson<{ data: MyTicketLite[] }>(userId, '/api/me/tickets?scope=upcoming')).data;
+}
+
+// リセールで買える人（この試合で resale 注文が上限の 6 枚に達していない人）。exclude は除く
+export async function pickResaleBuyer(matchId: number, exclude: number): Promise<number> {
+  const { data } = await getJson<{ data: { id: number; role: string }[] }>(undefined, '/api/demo/users?limit=200');
+  for (const u of data.filter((x) => x.role === 'customer' && x.id !== exclude).reverse()) {
+    const bought = (await getMyTickets(u.id)).filter((t) => t.source === 'resale' && t.match.id === matchId).length;
+    if (bought < 5) return u.id;
+  }
+  throw new Error('リセールで買えるデモユーザーがいない');
+}
+
+// 指定席を 1 枚、API で仮押さえして決済まで済ませ、注文 ID を返す
+export async function buySeat(userId: number, matchId: number, seatId: number): Promise<number> {
+  await clearCart(userId, matchId);
+  const api = await newApi(userId);
+  try {
+    const hold = await api.post(`/api/matches/${matchId}/cart/items`, { data: { seat_id: seatId } });
+    if (!hold.ok()) throw new Error(`hold -> ${hold.status()}`);
+    const { cart } = (await hold.json()) as { cart: { id: number } };
+    const pay = await api.post(`/api/orders/${cart.id}/checkout`);
+    if (!pay.ok()) throw new Error(`checkout -> ${pay.status()} ${await pay.text()}`);
+    return cart.id;
+  } finally {
+    await api.dispose();
+  }
+}
