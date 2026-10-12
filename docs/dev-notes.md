@@ -160,8 +160,8 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 
 - カート = `orders.status='pending'` の行（ユーザー × 試合で 1 つ、部分ユニーク）。席 1 つにつき `tickets`（`held`）と
   `order_items` を 1 行ずつ。解除は `released`、期限切れは `expired` で行を残す（カゴ落ちを SQL で追える）
-- status は `App\Enums\TicketStatus`（held / paid / released / expired）、`OrderStatus`（pending / paid / expired）
-- 二重販売防止: 指定席は部分ユニーク `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL AND status NOT IN ('released','expired')`
+- status は `App\Enums\TicketStatus`（held / paid / released / expired / resold）、`OrderStatus`（pending / paid / expired）
+- 二重販売防止: 指定席は部分ユニーク `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL AND status NOT IN ('released','expired','resold')`
   に `ON CONFLICT DO NOTHING` で当てる。自由席は `match_block_allocations` の行を `FOR UPDATE` して capacity を数える。
   ロック順は「カート行 → allocation 行 → tickets」で統一（`CartService` / `DbUnreservedStock` / `CheckoutService`）。
   2026-10-06 から指定席も allocation 行を `FOR SHARE` で取る（下の「割当エディタ」のロック設計）
@@ -399,6 +399,19 @@ us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象
 - Claude Code の auto mode は `cdk deploy` を拒否した。`!` でユーザーが実行し、`.claude/settings.local.json` に範囲を絞って許可を足した
   （cdk diff / deploy と `aws-analytics.sh` の sync / query / funnel / compare）。`query` は SELECT / WITH だけ通し、書き込みは `ddl` に分けてある
   （自動許可で任意 SQL を流せると DROP / UNLOAD が通ってしまう）。`ddl` / `teardown` / `cdk destroy` は都度承認
+
+## リセール（2026-10-12）
+
+- `resale_listings` に出品 1 件 1 行（active / sold / cancelled / expired）。部分ユニーク `(ticket_id) WHERE status IN ('active','sold')` で二重出品を防ぐ。
+  金額（price / seller_fee / buyer_fee / payout）は出品時に確定して保存。設定は `config/ticketing.php` の `resale.*`
+- 購入（`ResaleService::purchase`）: (買い手, 試合) の advisory lock → 元チケット FOR UPDATE → 出品行 FOR UPDATE。ロック後に時刻を取り、
+  元チケットを `resold` にしてから新チケットを INSERT（逆順だと部分ユニークに当たる）。order は pending を経由せず kind=resale・paid で作る。
+  allocation 行はロックしない（paid が 1 減って 1 増えるだけ）。`SET LOCAL lock_timeout`（既定 2.5 秒）の 55P03 は 409 `listing_unavailable`
+- 出品・取り下げも「チケット → 出品行」の順。出品中のチケットは paid のまま（在庫・割当エディタ・年パス発行の判定を変えない）で、QR だけ返さない。
+  取り下げは active なら期間外でも可。締切を過ぎた active は `resale:expire-listings`（毎分）が expired にする
+- 年パス券を売っても `season_pass_seat_id` は元チケットに残るので、`SeasonPassIssuer` は再発行しない。新チケットの `season_pass_seat_id` は NULL
+- tickets.status に値を足すときは、部分ユニーク・CHECK・`consumingInventory`・`OrderResource` の絞り込み・analytics の SQL を全部見直す
+- 申し送り: 決済をトランザクション内で呼んでいる（mock なので問題ないが、実決済にするなら冪等キーと外出し）。入場ゲートを作るときは「paid かつ active 出品なし」で判定する
 
 ## 次にやること
 

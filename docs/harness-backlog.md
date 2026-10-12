@@ -7,7 +7,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 |---|---|---|---|---|
 | hook | 編集後の自動フォーマット（pint / eslint --fix） | 0 | - | 候補 |
 | hook | 停止時に `scripts/check.sh` の通過を強制 | 0 | - | 候補 |
-| hook | ホスト側 php / composer の実行と、開発 DB への `migrate:fresh` をブロック | 0 | - | 候補 |
+| hook | ホスト側 php / composer の実行と、開発 DB への `migrate:fresh` をブロック。2026-10-12: リセール Step 4 の implementer が `DB_DATABASE=penusta_test` を付け忘れて `migrate:fresh --seed` を流し、開発 DB を作り直した（ユーザー承認のうえ生成器で再生成） | 1 | 2026-10-12 | 候補 |
 | skill | `/feature`: 調査 → 実装 → 検証 → レビューの一連（`CLAUDE.md` の「標準の流れ」を切り出す） | 1 | 2026-10-03 | 候補 |
 | skill | `/audit`: code-reviewer と security-reviewer を並列実行して統合報告 | 1 | 2026-10-03 | 候補 |
 | skill | `/step`: 1 ステップ分の「implementer → verifier → レビュー → 差し戻し → verifier → コミット」。購入フローで 7 回、イベントエクスポートで 3 回同じ手順をブリーフした | 2 | 2026-10-04 | 採用（`.claude/skills/step/SKILL.md`） |
@@ -55,7 +55,7 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | researcher のブリーフに、販売モデルの前提（年パス・会員をいつ売るか、途中加入・解約の有無）を最初から書く。調査の途中で前提を追加した（販売フェーズの年パス検討） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | dev-notes.md に「開発 DB の psql ユーザーは `backend/.env` の `DB_USERNAME`（postgres ではない）」を書く（researcher の指摘） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | implementer.md の Feature テストの定石に足す案: `orders_one_pending_per_user_match` を踏むので pending を複数作るときは user / match を分ける、Enum キャストのモデルで CHECK を検証するときは `DB::table()->insert` を使う | 1 | 2026-10-11 | 候補 |
-| 定義修正 | verifier.md に「`scripts/check.sh` は 120 秒を超えるので、Bash の timeout を 600000 にしてフォアグラウンドで実行する」を足す案。バックグラウンドに回した verifier が報告を返さずに終了した（販売フェーズのステップ 2） | 1 | 2026-10-11 | 候補 |
+| 定義修正 | verifier.md / implementer.md に「`scripts/check.sh` は 120 秒近くかかるので、Bash の timeout を 600000 にしてフォアグラウンドで実行する」を足す案。バックグラウンドに回した verifier が報告を返さずに終了した（販売フェーズのステップ 2）。2026-10-12: phpunit が 80〜100 秒になり、リセール Step 2 の implementer も同じ指摘 | 2 | 2026-10-12 | 候補 |
 | 定義修正 | implementer.md の Feature テストの定石に「`BuildsSaleFixture` のブロックコード（M1 等）は `StadiumSeeder` と衝突する。DatabaseSeeder を使うテストは fixture を使うクラスと分ける」を足す案 | 1 | 2026-10-11 | 候補 |
 | hook / check | `PurchaseException` の code（`new self('xxx'`）と `frontend/src/lib/api.ts` の `ApiErrorCode` を突き合わせる。販売フェーズで `not_eligible` を backend に足した時点で api.ts が未更新のまま、初回レビューも見落とした（再レビューで検出。今回はステップ分割で次ステップの予定だった） | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 購入まわりのブリーフに「CartTest / CheckoutTest は `BuildsSaleFixture` を使わず自前で試合を作るので、前提データ（フェーズ等）を足したら両方にも足す」を書く。足さずに 44 件落ちた（implementer が自力で対処） | 1 | 2026-10-11 | 候補 |
@@ -65,3 +65,13 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | E2E を「その時のデータに合わせて選ぶ」形に直すとき、初期値によって検証が空振りしないか（同じ値への変更、元が buffer のブロックを buffer に塗る）を完了条件に入れる。haiku の修正で 2 か所残り、メインが直した | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 閲覧権限を足すブリーフに、未ログインで API を叩いている既存テスト・e2e ヘルパーを grep して影響範囲として書く（PurchaseFoundationTest、SeasonPassIssuerTest、e2e/lib/api.ts が壊れた） | 1 | 2026-10-12 | 候補 |
 | 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |
+| 定義修正 | researcher の設計比較ブリーフで「決めること」11 項目と字数上限 3000 字が衝突し、根拠を書ききれなかった（リセールの設計）。項目数か字数のどちらかを緩める | 1 | 2026-10-12 | 候補 |
+| 定義修正 | implementer.md に「status の値を足すときは、その列を列挙・判定する index・CHECK・scope・SQL を grep して監査表を返す」を足す案。リセールでブリーフに入れたら漏れなく出た | 1 | 2026-10-12 | 候補 |
+| 定義修正 | implementer.md の定石に「ロックを取るサービスは時刻をロック取得後に内部で取る。`$now` を引数で受けない」を足す案。ResaleService が引数で受けてレビュー（中）で戻した | 1 | 2026-10-12 | 候補 |
+| 定義修正 | ブリーフに「読み取り用のフラグ（can_*）は対応する書き込みメソッドと同じ述語を共有する」を書く。can_list は共有、can_cancel は期間を余計に見て食い違った（レビュー中） | 1 | 2026-10-12 | 候補 |
+| 定義修正 | api.ts の型を変えるブリーフに「frontend の既存コード（server-api.ts の網羅マップ、楽観更新の仮データ）の最小修正を含む」を書く | 1 | 2026-10-12 | 候補 |
+| check | 新しいルートを足した直後は `next typegen` を流さないと `PageProps<"...">` で tsc が落ちる。`scripts/check.sh frontend` の前に typegen を実行する案 | 1 | 2026-10-12 | 候補 |
+| 定義修正 | tickets / orders を FK 参照するテーブルを足すブリーフに「`GenerateDemoData` の TRUNCATE 対象に足す」を書く（既存テスト 16 件が落ちた） | 1 | 2026-10-12 | 候補 |
+| check | phpunit の memory_limit 128MB に生成系テストが近い（ピーク 80MB 台、一度超えた）。`phpunit.xml` の ini で上限を上げるか、生成テストを分ける | 1 | 2026-10-12 | 候補 |
+| 定義修正 | E2E の定石に「繰り返し実行で状態が溜まるもの（購入上限など）をユーザー選定で考慮し、マイチケット等の探索は試合で絞る」を足す案（resale.spec、レビューで中） | 1 | 2026-10-12 | 候補 |
+| 定義修正 | 生成器の前後比較は同じシード済み DB の上で行う（`migrate:fresh --seed` のたびに構造データ由来の値がずれる）。生成器を変えるブリーフに書く | 1 | 2026-10-12 | 候補 |
