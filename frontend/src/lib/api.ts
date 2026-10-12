@@ -145,7 +145,8 @@ export type ApiErrorCode =
   | "payment_declined" | "user_required" | "validation_failed" | "unknown"
   | "allocation_conflict" | "match_locked" | "allocation_busy" | "busy" | "forbidden" | "not_eligible" | "seats_hidden"
   | "resale_closed" | "not_owner" | "not_listable" | "price_out_of_range" | "listing_unavailable"
-  | "own_listing" | "resale_limit_reached" | "payment_failed";
+  | "own_listing" | "resale_limit_reached" | "payment_failed"
+  | "resale_hold_exists" | "listing_held" | "resale_hold_cooldown" | "not_found";
 export type ApiError = { code: ApiErrorCode; message: string; details?: { blocks?: AllocationConflict[] } };
 export type ActionResult<T> = { ok: true; data: T } | { ok: false; error: ApiError };
 export type SeatDisplayStatus = SeatStatus | "mine";
@@ -163,6 +164,8 @@ export type MyListing = {
   // 出品者の受取額 = price - seller_fee - transfer_fee
   payout: number;
   closes_at: string;
+  // 買い手が仮押さえ中（取り下げ不可）
+  on_hold: boolean;
 };
 export type MyTicket = {
   id: number;
@@ -205,6 +208,21 @@ export type ResaleOffer = {
   buyer_fee: number;
   total: number;
 };
+// 買い手本人の仮押さえ（10 分）。ticket_id・出品者の情報は含まない
+export type ResaleHold = {
+  id: number;
+  listing_id: number;
+  match_id: number;
+  expires_at: string;
+  block: TicketBlock;
+  seat: TicketSeat | null;
+  seat_category: string;
+  ticket_type: TicketType;
+  price: number;
+  buyer_fee: number;
+  total: number;
+};
+export type ResaleCartResponse = { hold: ResaleHold | null; server_time: string };
 export type ResaleBlock = {
   block: TicketBlock;
   seating_type: "reserved" | "unreserved";

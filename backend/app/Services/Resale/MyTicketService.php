@@ -8,6 +8,7 @@ use App\Enums\ResaleListingStatus;
 use App\Enums\TicketStatus;
 use App\Models\MatchPrice;
 use App\Models\OrderItem;
+use App\Models\ResaleHold;
 use App\Models\ResaleListing;
 use App\Models\TicketType;
 use App\Models\User;
@@ -91,6 +92,9 @@ class MyTicketService
             ->get()
             ->keyBy('ticket_id');
 
+        // 有効な仮押さえがある出品（1 クエリ）
+        $held = ResaleHold::live($now)->whereIn('listing_id', $listings->pluck('id'))->pluck('listing_id')->flip();
+
         // 年パス券の定価は単券の大人価格から出すので、必要なときだけ一括で引く
         $adultId = null;
         $singles = collect();
@@ -105,7 +109,7 @@ class MyTicketService
         $min = (int) config('ticketing.resale.min_price');
         $open = [];
 
-        return $items->map(function (OrderItem $item) use ($user, $now, $listings, $adultId, $singles, $min, &$open) {
+        return $items->map(function (OrderItem $item) use ($user, $now, $listings, $held, $adultId, $singles, $min, &$open) {
             $ticket = $item->ticket;
             $listing = $listings->get($ticket->id);
             $hasActive = $listing?->status === ResaleListingStatus::Active;
@@ -120,7 +124,9 @@ class MyTicketService
                 }
             }
 
-            return new MyTicketView($item, $listing, $face !== null, $listing !== null && $this->resale->canCancel($listing->status), $face);
+            $onHold = $listing !== null && $held->has($listing->id);
+
+            return new MyTicketView($item, $listing, $face !== null, $listing !== null && $this->resale->canCancel($listing->status, $onHold), $onHold, $face);
         })->values();
     }
 }

@@ -117,10 +117,22 @@ class ResaleService
         return null;
     }
 
-    /** 取り下げられるか。active なら期間外(締切後で失効前、on_sale 以外)でも可。cancel() の検証と API の can_cancel が共有する。 */
-    public function canCancel(ResaleListingStatus $status): bool
+    /**
+     * 取り下げを拒む理由。active なら期間外(締切後で失効前、on_sale 以外)でも可、有効な仮押さえがあれば不可。
+     * cancel() の検証と API の can_cancel / canCancel が共有する。
+     */
+    public function cancelBlocker(ResaleListingStatus $status, bool $held): ?ResaleException
     {
-        return $status === ResaleListingStatus::Active;
+        if ($status !== ResaleListingStatus::Active) {
+            return ResaleException::listingUnavailable();
+        }
+
+        return $held ? ResaleException::listingHeld() : null;
+    }
+
+    public function canCancel(ResaleListingStatus $status, bool $held): bool
+    {
+        return $this->cancelBlocker($status, $held) === null;
     }
 
     /**
@@ -172,11 +184,10 @@ class ResaleService
             }
             // 時刻はロック取得後に取る
             $now = CarbonImmutable::now();
-            if (! $this->canCancel($locked->status)) {
-                throw ResaleException::listingUnavailable();
-            }
-            if (ResaleHold::live($now)->where('listing_id', $locked->id)->exists()) {
-                throw ResaleException::listingHeld();
+            $held = $locked->status === ResaleListingStatus::Active
+                && ResaleHold::live($now)->where('listing_id', $locked->id)->exists();
+            if (($blocker = $this->cancelBlocker($locked->status, $held)) !== null) {
+                throw $blocker;
             }
 
             $locked->status = ResaleListingStatus::Cancelled;

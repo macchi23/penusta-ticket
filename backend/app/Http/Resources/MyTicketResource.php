@@ -51,7 +51,7 @@ class MyTicketResource extends JsonResource
             'source' => $item->order->kind->value,
             'status' => $ticket->status->value,
             'order_id' => $item->order_id,
-            'listing' => $listing === null ? null : (new MyListingResource($listing))->resolve($request),
+            'listing' => $listing === null ? null : (new MyListingResource($listing, $this->resource->onHold))->resolve($request),
             'can_list' => $this->resource->canList,
             'can_cancel' => $this->resource->canCancel,
         ];

@@ -13,6 +13,7 @@ use App\Http\Controllers\Api\MatchPriceController;
 use App\Http\Controllers\Api\MyTicketController;
 use App\Http\Controllers\Api\OrderController;
 use App\Http\Controllers\Api\ResaleBoardController;
+use App\Http\Controllers\Api\ResaleCartController;
 use App\Http\Controllers\Api\ResalePurchaseController;
 use App\Http\Controllers\Api\TicketListingController;
 use Illuminate\Support\Facades\Route;
@@ -45,7 +46,11 @@ Route::middleware(['auth:demo', 'throttle:cart'])->group(function () {
     Route::post('/tickets/{ticket}/listing', [TicketListingController::class, 'store'])->whereNumber('ticket');
     Route::delete('/tickets/{ticket}/listing', [TicketListingController::class, 'destroy'])->whereNumber('ticket');
     Route::post('/resale-listings/{listing}/purchase', [ResalePurchaseController::class, 'store'])->whereNumber('listing');
+    Route::post('/resale-listings/{listing}/hold', [ResaleCartController::class, 'hold'])->whereNumber('listing');
+    Route::delete('/resale-holds/{hold}', [ResaleCartController::class, 'release'])->whereNumber('hold');
+    Route::post('/resale-holds/{hold}/checkout', [ResaleCartController::class, 'checkout'])->whereNumber('hold');
 });
+Route::get('/matches/{match}/resale-cart', [ResaleCartController::class, 'show'])->middleware('auth:demo');
 // 任意認証(ゲストには login_required を返す)
 Route::get('/matches/{match}/resale-listings', [ResaleBoardController::class, 'index']);
 

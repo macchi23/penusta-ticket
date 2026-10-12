@@ -15,6 +15,11 @@ class MyListingResource extends JsonResource
 {
     public static $wrap = null;
 
+    public function __construct(ResaleListing $resource, private bool $onHold = false)
+    {
+        parent::__construct($resource);
+    }
+
     public function toArray(Request $request): array
     {
         return [
@@ -26,6 +31,7 @@ class MyListingResource extends JsonResource
             'transfer_fee' => $this->price - $this->seller_fee - $this->payout,
             'payout' => $this->payout,
             'closes_at' => OrderResource::time($this->closes_at),
+            'on_hold' => $this->onHold,
         ];
     }
 }

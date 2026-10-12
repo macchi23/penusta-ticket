@@ -6,6 +6,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use Illuminate\Http\Request;
+use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 
 return Application::configure(basePath: dirname(__DIR__))
     ->withRouting(
@@ -30,6 +31,12 @@ return Application::configure(basePath: dirname(__DIR__))
 
             return response()->json($body, $e->status);
         });
+
+        // モデル名や id を含む既定の 404 メッセージを返さない。
+        // ModelNotFoundException は prepareException で NotFoundHttpException に変換されてからここに来る
+        $exceptions->render(fn (NotFoundHttpException $e, Request $request) => $request->is('api/*')
+            ? response()->json(['code' => 'not_found', 'message' => '見つかりません。'], 404)
+            : null);
 
         // allocation ロック待ち（lock_not_available）とデッドロック再試行枯渇は、SQL を出さずに 503 で返す
         $exceptions->render(function (QueryException $e, Request $request) {

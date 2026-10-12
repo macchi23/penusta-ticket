@@ -55,6 +55,8 @@ class AppServiceProvider extends ServiceProvider
         // 数値以外の id は 22P02（500）にせず 404 にする
         Route::pattern('match', '[0-9]+');
         Route::pattern('block', '[0-9]+');
+        Route::pattern('listing', '[0-9]+');
+        Route::pattern('hold', '[0-9]+');
 
         RateLimiter::for('events', function (Request $request) {
             $session = $request->header('X-Session-Id');

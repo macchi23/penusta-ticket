@@ -20,6 +20,14 @@ export function resaleErrorMessage(error: ApiError, context: ResaleContext): str
       return "自分の出品は購入できません。";
     case "resale_limit_reached":
       return "この試合で購入できる枚数の上限に達しています。";
+    case "resale_hold_exists":
+      return "別の出品を購入手続き中です。";
+    case "listing_held":
+      return "購入手続き中のため取り下げできません。";
+    case "resale_hold_cooldown":
+      return "この出品は少し時間をおいてから再度お試しください。";
+    case "cart_expired":
+      return "購入手続きの有効期限が切れました。もう一度お試しください。";
     case "payment_failed":
       return "決済に失敗しました。もう一度お試しください。";
     case "user_required":

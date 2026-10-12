@@ -16,6 +16,7 @@ final class MyTicketView
         public readonly ?ResaleListing $listing,
         public readonly bool $canList,
         public readonly bool $canCancel,
+        public readonly bool $onHold,
         public readonly ?array $face,
     ) {}
 }
