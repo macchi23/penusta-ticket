@@ -19,6 +19,10 @@ Schedule::command('tickets:expire-holds')
     ->everyMinute()
     ->onFailure($handleFailure('tickets:expire-holds'));
 
+Schedule::command('resale:expire-listings')
+    ->everyMinute()
+    ->onFailure($handleFailure('resale:expire-listings'));
+
 Schedule::command('events:export')
     ->dailyAt('00:30')
     ->withoutOverlapping(60)

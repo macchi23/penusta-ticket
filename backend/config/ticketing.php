@@ -18,6 +18,20 @@ return [
     // 1 注文あたりの最大枚数
     'max_tickets_per_order' => (int) env('TICKETING_MAX_TICKETS_PER_ORDER', 6),
 
+    // リセール（チケットの再販売）
+    'resale' => [
+        // 出品価格の下限（円）
+        'min_price' => (int) env('TICKETING_RESALE_MIN_PRICE', 500),
+        // 出品者の手数料率、振込手数料（円）、買い手の手数料（円、1 枚あたり）
+        'seller_fee_rate' => (float) env('TICKETING_RESALE_SELLER_FEE_RATE', 0.10),
+        'transfer_fee' => (int) env('TICKETING_RESALE_TRANSFER_FEE', 330),
+        'buyer_fee' => (int) env('TICKETING_RESALE_BUYER_FEE', 220),
+        // キックオフの何分前にリセールを締め切るか
+        'close_minutes_before_kickoff' => (int) env('TICKETING_RESALE_CLOSE_MINUTES', 150),
+        // 年パス券の定価 = 単券の大人価格 × (1 - この率)
+        'season_pass_discount_rate' => (float) env('TICKETING_RESALE_SEASON_PASS_DISCOUNT_RATE', 0.25),
+    ],
+
     // 開発用ユーザー切替（なりすまし）。本番では必ず false
     'demo_auth_enabled' => (bool) env('DEMO_AUTH_ENABLED', false),
 

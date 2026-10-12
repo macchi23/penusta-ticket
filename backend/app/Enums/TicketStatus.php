@@ -8,4 +8,5 @@ enum TicketStatus: string
     case Paid = 'paid';
     case Released = 'released';
     case Expired = 'expired';
+    case Resold = 'resold';
 }
