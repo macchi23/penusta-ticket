@@ -33,7 +33,7 @@ export default function ListingForm({ ticketId, terms }: { ticketId: number; ter
           max={terms.face_price}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          className="ml-2 w-32 rounded border border-gray-300 px-2 py-1 text-gray-900"
+          className="ml-2 w-32 rounded border border-gray-300 bg-white px-2 py-1 text-gray-900"
         />
       </label>
       {valid ? (
