@@ -64,14 +64,21 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | 生成器を変えるブリーフの前に、関連する不変条件のテスト（UnsoldMatchTest の「未販売の試合に何も無い」など）を grep して前提に書く | 1 | 2026-10-11 | 候補 |
 | 定義修正 | E2E を「その時のデータに合わせて選ぶ」形に直すとき、初期値によって検証が空振りしないか（同じ値への変更、元が buffer のブロックを buffer に塗る）を完了条件に入れる。haiku の修正で 2 か所残り、メインが直した | 1 | 2026-10-11 | 候補 |
 | 定義修正 | 閲覧権限を足すブリーフに、未ログインで API を叩いている既存テスト・e2e ヘルパーを grep して影響範囲として書く（PurchaseFoundationTest、SeasonPassIssuerTest、e2e/lib/api.ts が壊れた） | 1 | 2026-10-12 | 候補 |
-| 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする | 1 | 2026-10-11 | 候補 |
+| 定義修正 | 開発 DB に migrate した後でレビュー指摘によりマイグレーションを直すと、開発 DB とずれる（`season_pass_seats.user_id` の on delete）。スキーマのステップでは、開発 DB への migrate をレビュー通過後にする。2026-10-12: `resale_holds` の索引追加で再発（ユーザー承認で rollback → migrate） | 2 | 2026-10-12 | 候補 |
 | 定義修正 | researcher の設計比較ブリーフで「決めること」11 項目と字数上限 3000 字が衝突し、根拠を書ききれなかった（リセールの設計）。項目数か字数のどちらかを緩める | 1 | 2026-10-12 | 候補 |
 | 定義修正 | implementer.md に「status の値を足すときは、その列を列挙・判定する index・CHECK・scope・SQL を grep して監査表を返す」を足す案。リセールでブリーフに入れたら漏れなく出た | 1 | 2026-10-12 | 候補 |
 | 定義修正 | implementer.md の定石に「ロックを取るサービスは時刻をロック取得後に内部で取る。`$now` を引数で受けない」を足す案。ResaleService が引数で受けてレビュー（中）で戻した | 1 | 2026-10-12 | 候補 |
 | 定義修正 | ブリーフに「読み取り用のフラグ（can_*）は対応する書き込みメソッドと同じ述語を共有する」を書く。can_list は共有、can_cancel は期間を余計に見て食い違った（レビュー中） | 1 | 2026-10-12 | 候補 |
 | 定義修正 | api.ts の型を変えるブリーフに「frontend の既存コード（server-api.ts の網羅マップ、楽観更新の仮データ）の最小修正を含む」を書く | 1 | 2026-10-12 | 候補 |
-| check | 新しいルートを足した直後は `next typegen` を流さないと `PageProps<"...">` で tsc が落ちる。`scripts/check.sh frontend` の前に typegen を実行する案 | 1 | 2026-10-12 | 候補 |
-| 定義修正 | tickets / orders を FK 参照するテーブルを足すブリーフに「`GenerateDemoData` の TRUNCATE 対象に足す」を書く（既存テスト 16 件が落ちた） | 1 | 2026-10-12 | 候補 |
-| check | phpunit の memory_limit 128MB に生成系テストが近い（ピーク 80MB 台、一度超えた）。`phpunit.xml` の ini で上限を上げるか、生成テストを分ける | 1 | 2026-10-12 | 候補 |
+| check | 新しいルートを足した直後は `next typegen` を流さないと `PageProps<"...">` で tsc が落ちる。`scripts/check.sh frontend` の前に typegen を実行する案。2026-10-12: リセール用カートの resale-checkout でも再発 | 2 | 2026-10-12 | 候補 |
+| 定義修正 | tickets / orders を FK 参照するテーブルを足すブリーフに「`GenerateDemoData` の TRUNCATE 対象に足す」を書く（既存テスト 16 件が落ちた）。2026-10-12: リセール用カートの `resale_holds` でも implementer が気づいて足した | 2 | 2026-10-12 | 候補 |
+| check | phpunit の memory_limit 128MB に生成系テストが近い（ピーク 80MB 台、一度超えた）。`phpunit.xml` の ini で上限を上げるか、生成テストを分ける。2026-10-12: ランダム順で `MembershipPlannerTest` が 128MB を超えた（`artisan test` は子プロセスなので `php -d` が効かない） | 2 | 2026-10-12 | 候補 |
 | 定義修正 | E2E の定石に「繰り返し実行で状態が溜まるもの（購入上限など）をユーザー選定で考慮し、マイチケット等の探索は試合で絞る」を足す案（resale.spec、レビューで中） | 1 | 2026-10-12 | 候補 |
 | 定義修正 | 生成器の前後比較は同じシード済み DB の上で行う（`migrate:fresh --seed` のたびに構造データ由来の値がずれる）。生成器を変えるブリーフに書く | 1 | 2026-10-12 | 候補 |
+| 定義修正 | 仮押さえを作るブリーフとレビュー観点に「同じ人の取り直し（解放→再取得、期限切れ直後）で占有し続けられないか、制限の有無」を入れる。一次カートでは申し送り、リセールの hold では出品者の取り下げまで止まるため security-reviewer が中で検出し、クールダウンを入れた | 2 | 2026-10-12 | 候補 |
+| 定義修正 | code-reviewer の同時実行チェックに「ロック順の部分列でも、ロックを取らずに他の行を更新する整理 UPDATE（期限切れの掃除）は行ロック・部分ユニークの索引待ちで交差しうる」を足す案。code-reviewer は循環しないと判断し、security-reviewer が交差を検出した（リセール hold の expireStale） | 1 | 2026-10-12 | 候補 |
+| 定義修正 | security-reviewer（opus）が返却形式を守らず「重大指摘なし」の 1 行だけ返した（リセール用カート S2）。再依頼で出し直した。定義の返却形式に「指摘が無くても観点ごとの確認結果と読んだ範囲を書く」を明記する案 | 1 | 2026-10-12 | 候補 |
+| 定義修正 | リセール系のブリーフに「`/api/me/tickets` の応答キーは `data`」を書く（implementer の指摘） | 1 | 2026-10-12 | 候補 |
+| 定義修正 | ブリーフが「implementer.md の E2E の定石」を参照したが、implementer.md に E2E の節が無かった（台帳の E2E 定石の行は候補のまま）。E2E の定石を implementer.md に入れるか、ブリーフで参照しない | 1 | 2026-10-12 | 候補 |
+| 定義修正 | implementer がコマンドを run_in_background に回したまま、報告せずに終了した（リセール用カート S5 で 2 回続けて。再開依頼でも同じ）。新しい implementer に「すべてフォアグラウンド、run_in_background 禁止」と書いたら完了した。implementer.md に「check・テスト・生成はフォアグラウンド（timeout 600000）」を明記する案（上の P3a の行と方針が逆なので統合して決める） | 1 | 2026-10-13 | 候補 |
+| 環境 | app コンテナ内で php の autoload 読み込みが固まり、kill も compose restart も効かなかった（`did not receive an exit event` / `setns`）。Docker Desktop の再起動で復旧。dev-notes の環境のハマりどころに手順を書く案 | 1 | 2026-10-13 | 候補 |

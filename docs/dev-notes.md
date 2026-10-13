@@ -400,18 +400,35 @@ us-east-1 の `CDKToolkit`（2026-03-21 作成、別件の bootstrap）は対象
   （cdk diff / deploy と `aws-analytics.sh` の sync / query / funnel / compare）。`query` は SELECT / WITH だけ通し、書き込みは `ddl` に分けてある
   （自動許可で任意 SQL を流せると DROP / UNLOAD が通ってしまう）。`ddl` / `teardown` / `cdk destroy` は都度承認
 
-## リセール（2026-10-12）
+## リセール（2026-10-12、仮押さえは 2026-10-13）
 
 - `resale_listings` に出品 1 件 1 行（active / sold / cancelled / expired）。部分ユニーク `(ticket_id) WHERE status IN ('active','sold')` で二重出品を防ぐ。
   金額（price / seller_fee / buyer_fee / payout）は出品時に確定して保存。設定は `config/ticketing.php` の `resale.*`
-- 購入（`ResaleService::purchase`）: (買い手, 試合) の advisory lock → 元チケット FOR UPDATE → 出品行 FOR UPDATE。ロック後に時刻を取り、
-  元チケットを `resold` にしてから新チケットを INSERT（逆順だと部分ユニークに当たる）。order は pending を経由せず kind=resale・paid で作る。
-  allocation 行はロックしない（paid が 1 減って 1 増えるだけ）。`SET LOCAL lock_timeout`（既定 2.5 秒）の 55P03 は 409 `listing_unavailable`
-- 出品・取り下げも「チケット → 出品行」の順。出品中のチケットは paid のまま（在庫・割当エディタ・年パス発行の判定を変えない）で、QR だけ返さない。
-  取り下げは active なら期間外でも可。締切を過ぎた active は `resale:expire-listings`（毎分）が expired にする
+- 購入は仮押さえ経由だけ（`ResaleCartService`）: hold → 決済画面（`/matches/[id]/resale-checkout`）→ checkout。旧即時購入（`POST /resale-listings/{id}/purchase`）は削除した
+- 仮押さえは `resale_holds`（held / released / expired / purchased、`expires_at`、purchased のときだけ `order_id`）。行は残すのでカゴ落ちを SQL で追える。
+  有効な仮押さえ = `held AND expires_at > now`（`ResaleHold::scopeLive` の 1 か所）。正しさは時刻条件で保証し、期限切れの status 書き換えは整理
+  - 部分ユニーク `(listing_id) WHERE held`（同じ出品を 2 人が押さえない）と `(user_id, match_id) WHERE held`（1 人 1 試合 1 件）が最終防衛線
+  - `expires_at = min(now + hold_minutes, closes_at)`。同じ出品の再 hold は変更なし（延長しない）、別の出品は 409 `resale_hold_exists`
+  - 同じ (user, listing) は released / expired の後 30 分押さえ直せない（409 `resale_hold_cooldown`、`resale.hold_cooldown_minutes`）。起点は released なら `updated_at`、期限切れなら `expires_at`（整理の遅れで延びない）
+  - 押さえ中の出品は他人の一覧から消え（自分の分もカート側に出す）、出品者の取り下げは 409 `listing_held`。マイチケットは `on_hold` / `can_cancel` で同じ述語を使う
+- ロック順は全操作で advisory(7301, buyer×match) → tickets → resale_listings → resale_holds の部分列。`now` は最後のロックの後で取り、結果オブジェクトで返してイベント時刻にも使う。
+  `SET LOCAL lock_timeout`（既定 2.5 秒）の 55P03 は 409 `listing_unavailable`
+  - hold 内の期限切れ整理と `resale:expire-listings`（毎分、listings と holds）は `UPDATE ... WHERE id IN (SELECT ... FOR UPDATE SKIP LOCKED)`。行ロックの交差は避けるが、
+    部分ユニーク索引の待ちによる交差は残りうる（40P01 → 再試行、負けた側は 23505 → `listing_unavailable`）
+- checkout（`ResaleSettlement::settle` を共有）: 元チケットを `resold` にしてから新チケットを INSERT（逆順だと部分ユニークに当たる）。order は pending を経由せず kind=resale・paid。
+  purchased 済みの再送は同じ order を 200（冪等）。期限切れ・released は hold を expired にコミットしてから `cart_expired`。決済失敗は全体 rollback で hold は held のまま。
+  allocation 行はロックしない（paid が 1 減って 1 増えるだけ）
+- イベント: `resale_add_to_cart`（hold 新規時）/ `resale_remove_from_cart`（実際に released にしたとき）/ `resale_purchase`（新規 checkout）/ `payment_failed`（source resale）。
+  一次の funnel（`add_to_cart` / `purchase` の完全一致）には混ざらない
+- 出品中のチケットは paid のまま（在庫・割当エディタ・年パス発行の判定を変えない）で、QR だけ返さない。取り下げは active かつ有効な hold なしなら期間外でも可
 - 年パス券を売っても `season_pass_seat_id` は元チケットに残るので、`SeasonPassIssuer` は再発行しない。新チケットの `season_pass_seat_id` は NULL
+- API の 404 は汎用 `{code: not_found}`（既定メッセージにモデル名と id が出るため。`bootstrap/app.php`）
 - tickets.status に値を足すときは、部分ユニーク・CHECK・`consumingInventory`・`OrderResource` の絞り込み・analytics の SQL を全部見直す
-- 申し送り: 決済をトランザクション内で呼んでいる（mock なので問題ないが、実決済にするなら冪等キーと外出し）。入場ゲートを作るときは「paid かつ active 出品なし」で判定する
+- 申し送り:
+  - 決済をトランザクション内で呼んでいる（mock なので問題ないが、実決済にするなら hold id か order id を冪等キーにして外出し）
+  - 入場ゲートを作るときは「paid かつ active 出品なし」で判定する
+  - クールダウンは同じ出品だけ。別の出品を順に押さえ続ける占有は残る（1 人 1 試合 1 件なので影響は 1 出品ずつ）
+  - 期限切れで画面が空状態に切り替わる挙動は手動確認していない（backend のテストのみ）
 
 ## 次にやること
 
