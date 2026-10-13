@@ -255,7 +255,8 @@ LEFT JOIN (
 WHERE cb.allocation = 'home'
 GROUP BY cb.season, cb.seat_type ORDER BY cb.season, cb.seat_type;
 
-\echo '== 8. 整合性（すべて 0 が正）: 売れた出品と resold の元チケット・resale の注文の食い違い、席の二重占有'
+\echo '== 8. 整合性（すべて 0 が正）: 売れた出品と resold の元チケット・resale の注文・purchased の仮押さえの食い違い、席の二重占有'
 SELECT (SELECT count(*) FROM resale_listings WHERE status = 'sold') - (SELECT count(*) FROM tickets WHERE status = 'resold') AS sold_listings_minus_resold,
        (SELECT count(*) FROM resale_listings WHERE status = 'sold') - (SELECT count(*) FROM orders WHERE kind = 'resale') AS sold_listings_minus_resale_orders,
+       (SELECT count(*) FROM resale_listings WHERE status = 'sold') - (SELECT count(*) FROM resale_holds WHERE status = 'purchased') AS sold_listings_minus_purchased_holds,
        (SELECT count(*) FROM (SELECT 1 FROM tickets WHERE seat_id IS NOT NULL AND status NOT IN ('released', 'expired', 'resold') GROUP BY match_id, seat_id HAVING count(*) > 1) x) AS double_occupied_seats;

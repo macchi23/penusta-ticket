@@ -376,6 +376,14 @@ final class MatchSalesGenerator
         foreach ($this->listings as $listing) {
             $listing->id = $this->sink->nextId('resale_listings');
         }
+        // 同じ買い手の仮押さえを重ねないため、買い手ごとに売れた時刻順で直前の購入の時刻を持たせる（購入の処理順は時刻順とは限らない）
+        $sold = array_filter($this->listings, fn (DemoListing $l) => $l->soldAt !== null);
+        usort($sold, fn (DemoListing $a, DemoListing $b) => [$a->soldAt, $a->seq] <=> [$b->soldAt, $b->seq]);
+        $lastSoldAt = [];
+        foreach ($sold as $listing) {
+            $listing->buyerPrevSoldAt = $lastSoldAt[$listing->buyerIndex] ?? null;
+            $lastSoldAt[$listing->buyerIndex] = $listing->soldAt;
+        }
         foreach ($this->listings as $listing) {
             $this->writeListing($listing);
         }
@@ -437,8 +445,33 @@ final class MatchSalesGenerator
         foreach ($listing->buyerViews as [$type, $at]) {
             $this->emitEvent($type, $buyerId, $listing->buyerSessionId, $listing->buyerDevice, ['match_id' => $this->currentMatchId], $at);
         }
+        // 仮押さえは購入の 20〜59 秒前（view_resale は購入の 60 秒以上前）。乱数は引かず、出品の連番から決める。
+        // ただし出品より前・同じ買い手の直前の購入より前にはしない（1 人 1 試合の有効な仮押さえは 1 件）。
+        // 途中で取り消された・期限切れの仮押さえは作らない
+        // 別ブロックで同じ秒・1 秒差の購入が重なる稀なケースでも、購入の 1 秒前までに収める（直前の仮押さえと最大 1 秒重なりうる）
+        $holdAt = min(max(
+            $listing->listedAt,
+            ($listing->buyerPrevSoldAt ?? PHP_INT_MIN) + 1,
+            $listing->soldAt - (20 + crc32('hold:'.$listing->seq) % 40),
+        ), $listing->soldAt - 1);
+        $holdId = $this->sink->nextId('resale_holds');
+        $this->sink->add('resale_holds', [
+            $holdId, $listing->id, $buyerId, $this->currentMatchId, 'purchased',
+            PgCopy::timestampTz(min($holdAt + (int) config('ticketing.hold_minutes') * 60, $listing->closesAt)),
+            $listing->buyerOrderId, PgCopy::timestamp($holdAt), PgCopy::timestamp($listing->soldAt),
+        ]);
+        $this->emitEvent('resale_add_to_cart', $buyerId, $listing->buyerSessionId, $listing->buyerDevice, [
+            'listing_id' => $listing->id,
+            'hold_id' => $holdId,
+            'match_id' => $this->currentMatchId,
+            'block_id' => $listing->blockId,
+            'price' => $listing->price,
+            'discount_rate' => round(1 - $listing->price / $listing->facePrice, 3),
+            'quantity' => 1,
+        ], $holdAt);
         $this->emitEvent('resale_purchase', $buyerId, $listing->buyerSessionId, $listing->buyerDevice, [
             'listing_id' => $listing->id,
+            'hold_id' => $holdId,
             'order_id' => $listing->buyerOrderId,
             'match_id' => $this->currentMatchId,
             'block_id' => $listing->blockId,

@@ -28,6 +28,9 @@ final class DemoListing
     /** 値下げの再出品を出す時刻。出さないなら null */
     public ?int $relistAt = null;
 
+    /** 同じ買い手がこの試合で直前に買った出品の売れた時刻。仮押さえを重ねないために使う */
+    public ?int $buyerPrevSoldAt = null;
+
     public ?int $buyerIndex = null;
 
     public ?int $buyerOrderId = null;

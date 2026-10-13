@@ -27,7 +27,7 @@ class GenerateDemoDataTest extends TestCase
     private function fingerprint(): array
     {
         $result = [];
-        foreach (['users', 'memberships', 'season_pass_seats', 'orders', 'tickets', 'order_items', 'resale_listings', 'events'] as $table) {
+        foreach (['users', 'memberships', 'season_pass_seats', 'orders', 'tickets', 'order_items', 'resale_listings', 'resale_holds', 'events'] as $table) {
             $result[$table] = DB::selectOne("select count(*) c, md5(coalesce(string_agg(t::text, ',' order by id), '')) h from {$table} t");
         }
 
@@ -309,12 +309,14 @@ class GenerateDemoDataTest extends TestCase
         $fingerprint = fn () => [
             DB::selectOne("select count(*) c, md5(coalesce(string_agg(l::text, ',' order by id), '')) h from resale_listings l"),
             DB::selectOne("select count(*) c, md5(coalesce(string_agg(o::text, ',' order by id), '')) h from orders o where kind = 'resale'"),
-            DB::selectOne("select count(*) c, md5(coalesce(string_agg(e::text, ',' order by id), '')) h from events e where event_type in ('resale_list','resale_purchase','view_resale')"),
+            DB::selectOne("select count(*) c, md5(coalesce(string_agg(h::text, ',' order by id), '')) h from resale_holds h"),
+            DB::selectOne("select count(*) c, md5(coalesce(string_agg(e::text, ',' order by id), '')) h from events e where event_type in ('resale_list','resale_add_to_cart','resale_purchase','view_resale')"),
         ];
         $first = $fingerprint();
         $this->assertGreaterThan(100, $first[0]->c);
         $this->assertGreaterThan(50, $first[1]->c);
-        $this->assertGreaterThan(0, $first[2]->c);
+        $this->assertGreaterThan(50, $first[2]->c);
+        $this->assertGreaterThan(0, $first[3]->c);
 
         $this->generate(2, 0.05);
 
@@ -405,6 +407,29 @@ class GenerateDemoDataTest extends TestCase
             where l.status = 'cancelled' and e.id is null"));
         $this->assertSame(DB::table('resale_listings')->where('status', 'cancelled')->count(), DB::table('events')->where('event_type', 'resale_cancel')->count());
         $this->assertSame(DB::table('resale_listings')->where('status', 'sold')->count(), DB::table('events')->where('event_type', 'resale_purchase')->count());
+        // 仮押さえ: 成約ごとに purchased が 1 件（途中の取り消し・期限切れは生成しない）。時刻は view ≤ 押さえた時刻 < 注文 < 期限 ≤ 締切
+        $this->assertSame(DB::table('resale_listings')->where('status', 'sold')->count(), DB::table('resale_holds')->count());
+        $this->assertSame(0, $count("select 1 from resale_holds where status <> 'purchased'"));
+        $this->assertSame(0, $count("select 1 from resale_listings l where l.status = 'sold' and (select count(*) from resale_holds h where h.listing_id = l.id) <> 1"));
+        $this->assertSame(0, $count("select 1 from resale_holds h join resale_listings l on l.id = h.listing_id join orders bo on bo.id = l.buyer_order_id
+            where h.order_id is distinct from l.buyer_order_id or h.user_id <> bo.user_id or h.match_id <> l.match_id or l.status <> 'sold'
+            or (h.created_at at time zone 'UTC') >= bo.ordered_at or h.updated_at <> bo.created_at or h.expires_at <= bo.ordered_at or h.expires_at > l.closes_at
+            or h.expires_at <> least((h.created_at at time zone 'UTC') + interval '10 minutes', l.closes_at)
+            or (h.created_at at time zone 'UTC') < l.created_at
+            or coalesce((select max(v.occurred_at) from events v where v.event_type = 'view_resale' and v.user_id = bo.user_id and v.occurred_at <= bo.ordered_at and v.occurred_at > bo.ordered_at - interval '3 minutes'), '-infinity'::timestamptz) > (h.created_at at time zone 'UTC')"));
+        $this->assertGreaterThan(0, $count("select 1 from resale_holds h join resale_listings l on l.id = h.listing_id join orders bo on bo.id = l.buyer_order_id
+            where exists (select 1 from events v where v.event_type = 'view_resale' and v.user_id = bo.user_id and v.occurred_at <= bo.ordered_at and v.occurred_at > bo.ordered_at - interval '3 minutes')"));
+        // 押さえた時刻は購入時刻より前
+        $this->assertSame(0, $count('select 1 from resale_holds where created_at >= updated_at'));
+        // 同じ買い手・同じ試合の仮押さえの区間 [押さえた時刻, 購入時刻) は重ならない（有効な仮押さえは 1 人 1 試合 1 件）。
+        // 別ブロックを同じ秒に買ったときだけ、購入の 1 秒前に寄せるので 1 秒重なる（demo-data.md の限界）
+        $this->assertSame(0, $count('select 1 from resale_holds a join resale_holds b on a.user_id = b.user_id and a.match_id = b.match_id and a.id < b.id
+            where a.created_at < b.updated_at and b.created_at < a.updated_at and a.updated_at <> b.updated_at'));
+        $this->assertSame(DB::table('resale_holds')->count(), DB::table('events')->where('event_type', 'resale_add_to_cart')->count());
+        $this->assertSame(0, $count("select 1 from resale_holds h left join events e on e.event_type = 'resale_add_to_cart' and (e.payload->>'hold_id')::bigint = h.id
+            and (e.payload->>'listing_id')::bigint = h.listing_id and e.user_id = h.user_id and (e.payload->>'match_id')::bigint = h.match_id and e.occurred_at = (h.created_at at time zone 'UTC')
+            and (e.payload->>'quantity')::int = 1 where e.id is null"));
+        $this->assertSame(0, $count("select 1 from resale_holds h join events e on e.event_type = 'resale_purchase' and (e.payload->>'listing_id')::bigint = h.listing_id where (e.payload->>'hold_id')::bigint is distinct from h.id"));
         $this->assertGreaterThan(0, DB::table('events')->where('event_type', 'view_resale')->count());
         $this->assertSame(0, $count("select 1 from events e where e.event_type = 'view_resale' and e.occurred_at > ?::timestamptz", [$asOf]));
     }

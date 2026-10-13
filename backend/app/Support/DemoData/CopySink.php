@@ -15,6 +15,7 @@ final class CopySink
         'tickets' => ['id', 'match_id', 'block_id', 'seat_id', 'status', 'qr_uuid', 'expires_at', 'season_pass_seat_id', 'created_at', 'updated_at'],
         'order_items' => ['order_id', 'ticket_id', 'ticket_type_id', 'price', 'created_at', 'updated_at'],
         'resale_listings' => ['id', 'ticket_id', 'seller_user_id', 'match_id', 'block_id', 'ticket_type_id', 'face_price', 'price', 'seller_fee', 'buyer_fee', 'payout', 'status', 'closes_at', 'buyer_order_id', 'new_ticket_id', 'created_at', 'updated_at'],
+        'resale_holds' => ['id', 'listing_id', 'user_id', 'match_id', 'status', 'expires_at', 'order_id', 'created_at', 'updated_at'],
         'events' => ['event_type', 'user_id', 'session_id', 'device', 'payload', 'occurred_at', 'created_at', 'updated_at'],
     ];
 
@@ -22,7 +23,7 @@ final class CopySink
     private array $buffers = [];
 
     /** @var array<string, int> */
-    private array $nextIds = ['orders' => 1, 'tickets' => 1, 'season_pass_seats' => 1, 'resale_listings' => 1];
+    private array $nextIds = ['orders' => 1, 'tickets' => 1, 'season_pass_seats' => 1, 'resale_listings' => 1, 'resale_holds' => 1];
 
     /** @var array<string, int> */
     private array $counts = [];

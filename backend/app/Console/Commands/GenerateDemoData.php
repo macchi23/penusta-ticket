@@ -197,10 +197,10 @@ class GenerateDemoData extends Command
 
     private function finish(): void
     {
-        foreach (['users', 'orders', 'tickets', 'season_pass_seats', 'resale_listings'] as $table) {
+        foreach (['users', 'orders', 'tickets', 'season_pass_seats', 'resale_listings', 'resale_holds'] as $table) {
             $this->resetSequence($table);
         }
-        DB::statement('ANALYZE users, memberships, season_pass_seats, orders, tickets, order_items, resale_listings, events');
+        DB::statement('ANALYZE users, memberships, season_pass_seats, orders, tickets, order_items, resale_listings, resale_holds, events');
     }
 
     /** @return list<SeasonSpan> 古い順 */
