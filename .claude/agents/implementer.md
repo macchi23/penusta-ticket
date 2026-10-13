@@ -30,7 +30,10 @@ effort: medium
 - ブリーフに無い判断が必要になったら、最も保守的な選択で進め、返却の「逸脱・判断」に書く。
   ブリーフの前提が誤っていて進められない場合は、実装せずにその旨を返す
 - ファイルの書き換えは Edit / Write を使う。macOS の BSD `sed -i` は GNU と引数が違い、複数行の置換で失敗する
-- コミットしない。開発 DB `penusta` を `migrate:fresh` などで作り直さない。新しいマイグレーションの適用（`migrate`）は可
+- コミットしない。開発 DB `penusta` を `migrate:fresh` などで作り直さない。開発 DB への `migrate` もブリーフで指示されたときだけ行う
+  （スキーマはレビューの指摘で直ることがあり、先に適用するとマイグレーションと開発 DB がずれる。テストは `penusta_test` で走るので不要）
+- tickets / orders / resale_* を FK で参照するテーブルを足したら、`GenerateDemoData::cleanup()` の TRUNCATE にも足す（足さないと生成系テストが落ちる）。
+  生成器がそのテーブルを書くなら `CopySink` の列と nextIds、`GenerateDemoData::finish()` の sequence 更新と ANALYZE にも足す
 
 返す形式:
 

@@ -41,6 +41,8 @@ backend() {
 
 frontend() {
   step "eslint" docker compose exec -T frontend npm run lint
+  # 新しいルートを足した直後は PageProps / AppRoutes の型が無く tsc が落ちるので、先に生成する
+  step "typegen" docker compose exec -T frontend npx next typegen
   step "tsc" docker compose exec -T frontend npx tsc --noEmit
 }
 

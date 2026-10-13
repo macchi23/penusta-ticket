@@ -25,7 +25,10 @@ effort: high
   INSERT は `ON CONFLICT DO NOTHING` で、返りが空なら 409。自由席は `match_block_allocations` の該当行を `FOR UPDATE` してから
   capacity を数える。ロック順は「カート行（orders）→ allocation 行 → tickets」で統一されているか
 - 仮押さえ: status は `held`、期限はカート単位（`orders.expires_at` を ticket にコピー）。時刻条件は `expires_at > now`（`<=` で期限切れ）。
-  期限切れの扱い（残席計算、再販売、期限切れ後の決済）と、`now` をロック取得後に取っているか
+  期限切れの扱い（残席計算、再販売、期限切れ後の決済）と、`now` をロック取得後に取っているか。
+  リセールの仮押さえは `resale_holds`（有効 = `held AND expires_at > now`、`ResaleHold::scopeLive`）で、同じ考え方で見る
+- 取り直し: 同じ人が「解放 → 再取得」や「期限切れ直後の取り直し」で同じ席・出品を占有し続けられないか。制限（クールダウン等）の有無と、
+  占有が他人の操作（出品者の取り下げなど）まで止めるか
 - 時刻: JST の値を変換せずに保存していないか。保存は UTC、変換は明示
 - API 契約: レスポンスの形が `frontend/src/lib/api.ts` の型と一致しているか
 - クエリ: N+1、座席数（数万件）に比例するループ内クエリ、インデックスの効かない絞り込み
