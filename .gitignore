@@ -1,3 +1,5 @@
 .DS_Store
 *.log
 analytics/.out/
+# Qiita 連載の構成メモ（今後の予定を含むので公開しない）
+docs/article-series.md
