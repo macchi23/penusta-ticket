@@ -16,7 +16,7 @@
 ## 見どころ
 
 - **二重販売を DB で防ぐ**: 指定席は部分ユニークインデックス、自由席は割当行の `FOR UPDATE` で定員を数える。ロック順を全経路で揃え、
-  ロック待ち・期限の境界・同時実行を PHPUnit で検証している（`backend/tests/Feature/*Concurrency*`、`tests/Concerns/UsesProbeConnection`）
+  ロック待ち・期限の境界・同時実行を PHPUnit で検証している（`AllocationLockTest` / `ResaleCartConcurrencyTest` など、別接続で行を握る `tests/Concerns/UsesProbeConnection` を使うテスト）
 - **仮押さえの期限は時刻条件で保証**: 期限切れの status 書き換えはバッチの整理に任せ、正しさは `expires_at > now`（ロック取得後に取った now）で判定する
 - **合成データ**: 7 シーズン分。成績・対戦相手・曜日・天気・価格に需要が連動し、分析すると「答えが出る」ように作っている（[docs/demo-data.md](docs/demo-data.md)）
 - **Claude Code での開発運用**: メインのエージェントは分解・ブリーフ・統合だけを担い、実装・検証・レビューをサブエージェント（`.claude/agents/`）に
