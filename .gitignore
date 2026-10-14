@@ -3,3 +3,5 @@
 analytics/.out/
 # Qiita 連載の構成メモ（今後の予定を含むので公開しない）
 docs/article-series.md
+# 未公開の記事の下書き（Qiita で公開したら docs/articles/ へ移してコミットする）
+docs/articles/drafts/

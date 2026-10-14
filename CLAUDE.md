@@ -6,6 +6,7 @@
 ## 必須ルール
 
 - artisan / composer / npm はコンテナ経由（`docker compose exec app ...` / `docker compose exec frontend ...`）。ホストの PHP は使えない
+- 未公開の Qiita 記事は `docs/articles/drafts/`（追跡外）に書き、公開までコミットしない。リポジトリは GitHub で public。公開後に `docs/articles/` へ移してコミットする（`docs/articles/README.md`）
 - 例外: E2E（`e2e/`）はホストで実行する（`scripts/check.sh e2e`。初回は `cd e2e && npm ci && npx playwright install chromium`）
 - 例外: CDK（`infra/`）と実 AWS 向けの aws CLI はホストで実行する（`scripts/check.sh infra`。初回は `cd infra && npm ci`）。プロファイルは `personal-dev-admin`（`aws sso login --profile personal-dev-admin`）
 - 実 AWS への書き込み（`cdk deploy` / `destroy`、S3 への同期、Athena の DDL）はメインがユーザーに確認してから実行する。サブエージェントは synth と読み取りまで
