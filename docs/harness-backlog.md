@@ -81,4 +81,4 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | リセール系のブリーフに「`/api/me/tickets` の応答キーは `data`」を書く（implementer の指摘） | 1 | 2026-10-12 | 候補 |
 | 定義修正 | ブリーフが「implementer.md の E2E の定石」を参照したが、implementer.md に E2E の節が無かった（台帳の E2E 定石の行は候補のまま）。E2E の定石を implementer.md に入れるか、ブリーフで参照しない | 1 | 2026-10-12 | 候補 |
 | 定義修正 | implementer がコマンドを run_in_background に回したまま、報告せずに終了した（リセール用カート S5 で 2 回続けて。再開依頼でも同じ）。新しい implementer に「すべてフォアグラウンド、run_in_background 禁止」と書いたら完了した。implementer.md に「check・テスト・生成はフォアグラウンド（timeout 600000）」を明記する案（上の P3a の行と方針が逆なので統合して決める） | 1 | 2026-10-13 | 候補 |
-| 環境 | app コンテナ内で php の autoload 読み込みが固まり、kill も compose restart も効かなかった（`did not receive an exit event` / `setns`）。Docker Desktop の再起動で復旧。dev-notes の環境のハマりどころに手順を書く案 | 1 | 2026-10-13 | 候補 |
+| 環境 | app コンテナ内で php の autoload 読み込みが固まり、kill も compose restart も効かなかった（`did not receive an exit event` / `setns`）。Docker Desktop の再起動で復旧。dev-notes の環境のハマりどころに手順を書く案 | 1 | 2026-10-13 | 採用（dev-notes.md 環境の注意点 9） |
