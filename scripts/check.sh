@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# 検証の一本化。使い方: scripts/check.sh [backend|frontend|shell|e2e|infra|all]
+# 検証の一本化。使い方: scripts/check.sh [backend|frontend|shell|secrets|e2e|infra|all]
+# secrets は gitleaks で全履歴と追跡外の記事の下書きを検査する（all に含む）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 
@@ -72,19 +73,19 @@ infra() {
 # ホスト実行の scripts/*.sh の静的検査。macOS 標準の bash 3.2 で構文確認し、ShellCheck と grep で落とし穴を拾う
 shell_syntax() {
   local f rc=0
-  for f in scripts/*.sh; do
+  for f in scripts/*.sh scripts/git-hooks/pre-commit; do
     /bin/bash -n "$f" || rc=1
   done
   return "$rc"
 }
 
 shellcheck_scripts() {
-  docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh
+  docker run --rm -v "$PWD:/mnt:ro" -w /mnt koalaman/shellcheck:v0.11.0 -S warning scripts/*.sh scripts/git-hooks/pre-commit
 }
 
 # $VAR 直後のマルチバイト文字は bash 3.2 で変数名に取り込まれる（ShellCheck では拾えない）。${VAR} を使う
 shell_multibyte() {
-  if LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' scripts/*.sh; then
+  if LC_ALL=C grep -nE '\$[A-Za-z_][A-Za-z0-9_]*[^ -~[:space:]]' scripts/*.sh scripts/git-hooks/pre-commit; then
     echo '$VAR 直後にマルチバイト文字がある。${VAR} に直す' >&2
     return 1
   fi
@@ -95,6 +96,42 @@ shell() {
   step "bash -n" shell_syntax
   step "shellcheck" shellcheck_scripts
   step "shell multibyte" shell_multibyte
+}
+
+# ホストの gitleaks（8.30.1 で確認）を使う。コンテナ経由だと GIT_INDEX_FILE や linked worktree の .git が見えず検査をすり抜ける
+# 引数: gitleaks のサブコマンドと対象。実行失敗（rc 99 以外の非 0、出力に ERR）は漏れなしと区別して失敗にする
+run_gitleaks() {
+  if ! command -v gitleaks >/dev/null 2>&1; then
+    echo "gitleaks が無い。brew install gitleaks" >&2
+    return 1
+  fi
+  local out rc
+  out="$(GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=color.diff GIT_CONFIG_VALUE_0=never \
+    gitleaks "$1" -v --redact --no-banner --no-color --exit-code 99 \
+    --config "$PWD/.gitleaks.toml" "${@:2}" 2>&1)"
+  rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out"
+  if [ "$rc" -eq 99 ]; then
+    echo "秘密情報の疑いがある" >&2
+    return 1
+  elif [ "$rc" -ne 0 ]; then
+    echo "gitleaks の実行に失敗（rc=${rc}）" >&2
+    return 1
+  fi
+  case "$out" in
+    *' ERR '* | *'skipping file'*)
+      echo "gitleaks がエラーを出した / 読めないファイルがある（検査できていない恐れ）" >&2
+      return 1
+      ;;
+  esac
+}
+
+# docs/articles/drafts は追跡外なので git の履歴検査では見えない。dir で別に検査する
+secrets() {
+  step "gitleaks history" run_gitleaks git .
+  if [ -n "$(find docs/articles/drafts -type f 2>/dev/null | head -n 1)" ]; then
+    step "gitleaks drafts" run_gitleaks dir --follow-symlinks docs/articles/drafts
+  fi
 }
 
 if [ "$target" != infra ] && ! docker compose ps --status running --services >/dev/null 2>&1; then
@@ -108,8 +145,9 @@ case "$target" in
   e2e) e2e ;;
   infra) infra ;;
   shell) shell ;;
-  all) backend; frontend; shell ;;
-  *) echo "usage: scripts/check.sh [backend|frontend|shell|e2e|infra|all]" >&2; exit 2 ;;
+  secrets) secrets ;;
+  all) backend; frontend; shell; secrets ;;
+  *) echo "usage: scripts/check.sh [backend|frontend|shell|secrets|e2e|infra|all]" >&2; exit 2 ;;
 esac
 
 echo

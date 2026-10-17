@@ -1,0 +1,14 @@
+[extend]
+useDefault = true
+
+[[rules]]
+id = "aws-account-id-in-arn"
+description = "ARN に含まれる AWS アカウント ID"
+regex = '''arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:[0-9]{12}:'''
+keywords = ["arn:aws"]
+
+  # AWS ドキュメントの例示 ID
+  [[rules.allowlists]]
+  description = "AWS ドキュメントの例示アカウント ID"
+  regexTarget = "match"
+  regexes = ['''arn:aws[a-z-]*:[a-z0-9-]+:[a-z0-9-]*:(123456789012|111122223333|444455556666|777788889999):''']
