@@ -84,25 +84,6 @@ export type BlockSeats = {
   rows: { row: string; seats: { id: number; number: number; status: SeatStatus }[] }[];
 };
 
-export function apiBase(): string {
-  if (typeof window === "undefined") {
-    return (
-      process.env.API_URL_INTERNAL ??
-      process.env.NEXT_PUBLIC_API_URL ??
-      "http://localhost:8080"
-    );
-  }
-  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-}
-
-export async function fetchJson<T>(path: string): Promise<T> {
-  const res = await fetch(`${apiBase()}${path}`, { cache: "no-store" });
-  if (!res.ok) {
-    throw new Error(`API error ${res.status}: ${path}`);
-  }
-  return res.json();
-}
-
 export type DemoUser = { id: number; name: string; gender: string | null; birth_date: string | null; prefecture: string | null; role: "customer" | "admin"; memberships: string[] };
 export type TicketType = { id: number; code: string; name: string };
 export type MatchPrice = { seat_category: string; ticket_type: TicketType; price: number };

@@ -1,6 +1,5 @@
 // サーバー専用: cookie を読んで Laravel を呼ぶ。Client Component から import しないこと。
 import { cookies } from "next/headers";
-import { apiBase } from "@/lib/api";
 import type { ActionResult, AllocationConflict, ApiError, ApiErrorCode } from "@/lib/api";
 import { DEMO_USER_COOKIE, isDemoAuthEnabled } from "@/lib/demo-auth";
 
@@ -23,6 +22,10 @@ export class ApiHttpError extends Error {
 }
 
 const SESSION_COOKIE = "penusta_sid";
+
+function apiBase(): string {
+  return process.env.API_URL_INTERNAL ?? "http://localhost:8080";
+}
 
 async function buildHeaders(hasBody: boolean): Promise<Record<string, string>> {
   const store = await cookies();
