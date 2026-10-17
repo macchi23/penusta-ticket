@@ -70,8 +70,10 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 ## ゼロから再構築する手順
 
 ```bash
+cp backend/.env.example backend/.env  # 初回のみ。DEMO_AUTH_ENABLED=true に書き換える（ユーザー切替を有効にする）
 docker compose up -d --build
-docker compose exec app php artisan key:generate      # 初回のみ（.envはbackend/.env.exampleからコピー）
+docker compose exec app composer install             # vendor は追跡外なので clone 直後は必須
+docker compose exec app php artisan key:generate      # 初回のみ
 docker compose exec app php artisan migrate:fresh --seed --force   # 管理者と 7 シーズン分の試合（AS_OF 以降の 4 試合目からは未販売）もここで入る
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data   # 未販売の試合は飛ばす
 # S3 バケット（初回のみ）。aws CLI コンテナは compose の環境変数で RustFS を向く

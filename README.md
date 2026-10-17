@@ -40,9 +40,10 @@
 ```bash
 cp backend/.env.example backend/.env          # DEMO_AUTH_ENABLED=true に書き換える（デモ用ユーザー切替を有効にする）
 docker compose up -d --build
+docker compose exec app composer install
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate:fresh --seed --force   # スタジアム・7 シーズン分の試合・管理者
-# 取引データ（利用者・注文・リセール・行動ログ）。USE_ZEND_ALLOC=0 は php:8.4-alpine で大量 insert 時の heap 破損を避けるため
+# 取引データ（利用者・注文・リセール・行動ログ）。USE_ZEND_ALLOC=0 は大量 insert で起きる heap 破損（原因未特定）を避けるため
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data
 ```
 
@@ -60,7 +61,7 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
 - [docs/concept.md](docs/concept.md) — 構想とロードマップ
 - [docs/dev-notes.md](docs/dev-notes.md) — 設計判断・環境のハマりどころ・申し送り
 - [docs/demo-data.md](docs/demo-data.md) — 合成データの仕様
-- [docs/articles/](docs/articles/) — Qiita 連載「架空サカスタのチケットサイトで学ぶ」の下書き
+- [docs/articles/](docs/articles/) — Qiita 連載「架空サカスタのチケットサイトで学ぶ」の公開済みの回
   - [（0）ゴール裏年パス勢が、架空スタジアムのチケットサイトを作る理由](https://qiita.com/macchi23/items/5b9f5670c841f5c41be8)
   - [（1）スタジアムの座席をどうテーブルにするか](https://qiita.com/macchi23/items/b6cf889842beba4f5f6a)
 
