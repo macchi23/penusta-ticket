@@ -42,6 +42,7 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
    ホスト側node_modulesはIDE用（ホストで `npm ci`。コンテナには影響しない）。
    パッケージ追加は `docker compose exec frontend npm install <pkg>`（package.json / lock はバインドマウントでホストにも残る）。
    package.json を外から変えたとき（pull など）は `docker compose restart frontend`（起動コマンドの `npm install` が流れる）。
+   lock に libc が記録されていないので、Alpine にも gnu 版と musl 版の両方が入る（害は無い）。
    ボリュームは `docker compose down` では消えない。作り直すなら `docker volume rm penusta-ticket_frontend-node-modules`。
 5. Laravel はサーバー側（Server Components / Server Actions）からだけ呼ぶ。URL は `API_URL_INTERNAL=http://web`（compose のサービス名）で、
    `src/lib/server-api.ts` の `apiBase()` が読む。コンテナ内の `localhost` は frontend 自身を指すので使えない。
@@ -54,8 +55,8 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 7. **E2E（`e2e/`）はホストで実行する**（npm コンテナ経由ルールの例外）: `scripts/check.sh e2e`。
    初回は `cd e2e && npm ci && npx playwright install chromium`。dev 環境（3100 / 8080）が起動している必要がある。
 8. `notFound()` / `redirect()` を使うページで dev のオーバーレイ `Failed to execute 'measure' on 'Performance': ... cannot have a negative time stamp` が出ることがある。
-   React の dev 専用計測の既知のバグ（facebook/react #37561、vercel/next.js #86060 / #99032）。この環境での引き金は、
-   Docker Desktop の Resource Saver による VM の一時停止で `next-server` の単調クロックが実時間から遅れること。`docker compose restart frontend` で解消する。production には計測コードが無い。
+   React の dev 専用計測の既知のバグ（facebook/react #37561、vercel/next.js #86060 / #99032）。この環境では、Docker の VM が止まっていた間
+   `next-server` の単調クロックが進まず、実時間から遅れていた（何が VM を止めたかは未確認。Mac のスリープと推測）。`docker compose restart frontend` で解消する。production には計測コードが無い。
    E2E で `pageerror` を拾う場合は実行前に再起動する。
 9. **app コンテナが固まって止められなくなることがある**（2026-10-13 に 1 回。原因は未特定）。
    症状: `GenerateDemoDataTest` の実行中に、コンテナ内の `php artisan` / `phpunit` / `require vendor/autoload.php` が CPU 0 のまま返らなくなる
@@ -164,7 +165,7 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - `restart: on-failure`（`unless-stopped` だと Docker 再起動後に scheduler だけ上がり、db が無いまま毎分失敗する）、
   `stop_grace_period: 2m`（停止時に実行中の export を待つ）
 - app と scheduler は同じイメージ `penusta-ticket-php` を使う（別名だと片方だけ再ビルドして PHP のパッチバージョンがずれた。
-  8.4.24 / 8.4.26 で実際に発生）。Dockerfile を変えたら `docker compose build app` 1 回で両方に効く
+  scheduler 追加時に scheduler だけ新しくビルドされ、app 8.4.24 / scheduler 8.4.26 になった）。Dockerfile を変えたら `docker compose build app` 1 回で両方に効く
 - scheduler には `USE_ZEND_ALLOC=0` を付けていない（付けると memory_limit が効かなくなる懸念）。PHP 8.4.26 で全期間の export を
   env なしで 3 回流し、heap 破損は出なかった。必要なのは大量 insert の `penusta:generate-demo-data` だけ
 - scheduler は root で動き、bind mount の `storage/logs` にファイルを作る。Docker Desktop for Mac ではホストユーザー所有に見えるので
