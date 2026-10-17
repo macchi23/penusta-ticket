@@ -126,11 +126,11 @@ run_gitleaks() {
   esac
 }
 
-# docs/articles/drafts は追跡外なので git の履歴検査では見えない。dir で別に検査する
+# docs/private（別の private リポジトリ。記事の下書きなど）は ignore 済みで履歴検査では見えない。dir で別に検査する
 secrets() {
   step "gitleaks history" run_gitleaks git .
-  if [ -n "$(find docs/articles/drafts -type f 2>/dev/null | head -n 1)" ]; then
-    step "gitleaks drafts" run_gitleaks dir --follow-symlinks docs/articles/drafts
+  if [ -n "$(find docs/private -type f -not -path '*/.git/*' 2>/dev/null | head -n 1)" ]; then
+    step "gitleaks private" run_gitleaks dir --follow-symlinks docs/private
   fi
 }
 
