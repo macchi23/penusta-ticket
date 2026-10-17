@@ -27,19 +27,25 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
    `docker compose exec app php artisan ...` / `docker compose exec app composer ...`
 2. **`penusta:generate-demo-data` は `USE_ZEND_ALLOC=0` 必須**:
    `docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data`
-   php:8.4-alpine + 大量insertで `zend_mm_heap corrupted` が再現する（opcache無効でも発生、
-   システムアロケータなら安定）。PHP 8.3への切替は composer.lock がPHP 8.4前提のため不可だった。
+   php:8.4-fpm-alpine + 大量insertで `zend_mm_heap corrupted` が再現した（opcache無効でも発生、
+   システムアロケータなら安定。原因は未特定で、musl との因果も確認できていない）。
+   PHP 8.3への切替は composer.lock がPHP 8.4前提のため不可だった。
 3. **時刻はUTC統一**: app timezone は UTC のまま。JSTの時刻を書くコード（シーダ等）は
    `Carbon::parse($date, 'Asia/Tokyo')->...->utc()` と明示変換してから保存すること。
-   表示側（フロント）は `toLocaleString(..., { timeZone: "Asia/Tokyo" })` で変換済み。
+   表示側は backend の Resource（`setTimezone('Asia/Tokyo')`）と、フロントの `toLocaleString(..., { timeZone: "Asia/Tokyo" })` で変換済み。
+   コンテナの TZ はすべて UTC なので、フロントのサーバー描画で `timeZone` を省くと日本時間にならない。
+   業務の時刻は timestamptz、`created_at` / `updated_at` は `timestamps()` のままで timestamp（timezone なし）。
    ※Laravelはdatetime保存時にタイムゾーン変換しないため、変換を忘れると9時間ずれる（初回に踏んだ）。
    クエリに Carbon をバインドすると `Y-m-d H:i:s` に整形されオフセットが落ちる。timestamptz との比較は DB セッションの
    TimeZone で解釈されるため、pgsql 接続に `'timezone' => 'UTC'` を設定して固定している（`config/database.php`）。
 4. **frontendのnode_modulesはコンテナ専用ボリューム**（darwin/linuxのバイナリ差回避）。
-   ホスト側node_modulesはIDE用。パッケージ追加はホストで `npm install` + コンテナ再作成
-   （`docker compose up -d --force-recreate frontend`）が確実。
-5. サーバーコンポーネントからのAPI呼び出しは `API_URL_INTERNAL=http://web`（コンテナ内部）、
-   ブラウザからは `NEXT_PUBLIC_API_URL=http://localhost:8080`。`src/lib/api.ts` の `apiBase()` が出し分ける。
+   ホスト側node_modulesはIDE用（ホストで `npm ci`。コンテナには影響しない）。
+   パッケージ追加は `docker compose exec frontend npm install <pkg>`（package.json / lock はバインドマウントでホストにも残る）。
+   package.json を外から変えたとき（pull など）は `docker compose restart frontend`（起動コマンドの `npm install` が流れる）。
+   ボリュームは `docker compose down` では消えない。作り直すなら `docker volume rm penusta-ticket_frontend-node-modules`。
+5. Laravel はサーバー側（Server Components / Server Actions）からだけ呼ぶ。URL は `API_URL_INTERNAL=http://web`（compose のサービス名）で、
+   `src/lib/server-api.ts` の `apiBase()` が読む。コンテナ内の `localhost` は frontend 自身を指すので使えない。
+   以前はブラウザ用に `NEXT_PUBLIC_API_URL=http://localhost:8080` も持っていたが、ブラウザから呼ぶ箇所が無くなったので消した。
 6. Next.jsは**16.3**。規約が古い知識と違う可能性があるため、書く前に
    `frontend/node_modules/next/dist/docs/` を確認（`PageProps<'/path'>` 等のグローバル型ヘルパーを使う）。
    キャッシュのガイドは2系統ある。`01-getting-started/08-caching.md` は Cache Components が有効な前提で、
@@ -48,8 +54,8 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
 7. **E2E（`e2e/`）はホストで実行する**（npm コンテナ経由ルールの例外）: `scripts/check.sh e2e`。
    初回は `cd e2e && npm ci && npx playwright install chromium`。dev 環境（3100 / 8080）が起動している必要がある。
 8. `notFound()` / `redirect()` を使うページで dev のオーバーレイ `Failed to execute 'measure' on 'Performance': ... cannot have a negative time stamp` が出ることがある。
-   React の dev 専用計測の既知のバグ（vercel/next.js #86060 / #99032、facebook/react #37561）で、Docker VM の一時停止で
-   `next-server` の単調クロックが実時間から遅れると発生する。`docker compose restart frontend` で解消する。production には計測コードが無い。
+   React の dev 専用計測の既知のバグ（facebook/react #37561、vercel/next.js #86060 / #99032）。この環境での引き金は、
+   Docker Desktop の Resource Saver による VM の一時停止で `next-server` の単調クロックが実時間から遅れること。`docker compose restart frontend` で解消する。production には計測コードが無い。
    E2E で `pageerror` を拾う場合は実行前に再起動する。
 9. **app コンテナが固まって止められなくなることがある**（2026-10-13 に 1 回。原因は未特定）。
    症状: `GenerateDemoDataTest` の実行中に、コンテナ内の `php artisan` / `phpunit` / `require vendor/autoload.php` が CPU 0 のまま返らなくなる
