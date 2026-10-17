@@ -66,11 +66,16 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
    復旧: Docker Desktop を再起動（メニューの Restart、効かなければ Quit して起動し直す）→ `docker compose up -d`。
    作り直しに失敗した直後だと app が `<id>_penusta-ticket-app-1` という一時名で上がるので、`docker compose up -d --force-recreate --no-deps app`
    で正規の名前に戻す。app は状態を持たない（`./backend` をマウントしているだけ）ので作り直しても失うものは無く、DB のデータはボリュームに残る
+10. **秘密情報の検査は gitleaks（ホストのバイナリ）**: pre-commit フック（`scripts/git-hooks/pre-commit`）でステージ分、`scripts/check.sh secrets` で全履歴と
+   `docs/articles/drafts/` を見る。有効化は `git config core.hooksPath scripts/git-hooks`（相対パスなので、チェックアウト中のツリーのフックが動く）。
+   フックを含まないコミット（導入前のコミットからのブランチ、rebase の edit で古いコミットに止まったとき）の上では、git はフックを黙って飛ばす。
+   その取りこぼしは `check.sh secrets` の全履歴検査と、GitHub の Push Protection で拾う。Docker で動かす版は `git commit -a` と worktree ですり抜けたため使わない
 
 ## ゼロから再構築する手順
 
 ```bash
 cp backend/.env.example backend/.env  # 初回のみ。DEMO_AUTH_ENABLED=true に書き換える（ユーザー切替を有効にする）
+git config core.hooksPath scripts/git-hooks   # 初回のみ。gitleaks の pre-commit フック（ホストに brew install gitleaks）
 docker compose up -d --build
 docker compose exec app composer install             # vendor は追跡外なので clone 直後は必須
 docker compose exec app php artisan key:generate      # 初回のみ

@@ -15,7 +15,8 @@
 - API 契約は `frontend/src/lib/api.ts` の型が正。backend をこれに合わせる
 - matches テーブルのモデルは `FootballMatch`、events テーブルは `ActivityEvent`
 - テストは別 DB `penusta_test` で走る。開発 DB `penusta` への `migrate:fresh` 等はユーザーに確認してから
-- 検証は `scripts/check.sh [backend|frontend|shell|all]`（`all` は backend + frontend + shell。shell は `scripts/*.sh` の bash 3.2 構文・ShellCheck・`$VAR` 直後のマルチバイト検査）
+- 検証は `scripts/check.sh [backend|frontend|shell|secrets|all]`（`all` は backend + frontend + shell + secrets。shell は `scripts/*.sh` の bash 3.2 構文・ShellCheck・`$VAR` 直後のマルチバイト検査。secrets はホストの gitleaks で全履歴と `docs/articles/drafts/` を検査）
+- 秘密情報の検査: ホストの gitleaks（`brew install gitleaks`）を pre-commit フック（`scripts/git-hooks/pre-commit`、`git config core.hooksPath scripts/git-hooks` で有効）と `check.sh secrets` で回す。フックで止まったら値を消してから再コミットし、`--no-verify` で通さない
 
 ## 委譲
 

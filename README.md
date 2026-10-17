@@ -54,7 +54,8 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
 | http://localhost:8025 | mailpit |
 | http://localhost:9001/rustfs/console/ | RustFS console |
 
-検証は `scripts/check.sh [backend|frontend|shell|e2e|infra|all]`（pint / PHPUnit / ESLint / tsc / ShellCheck / Playwright）。
+検証は `scripts/check.sh [backend|frontend|shell|secrets|e2e|infra|all]`（pint / PHPUnit / ESLint / tsc / ShellCheck / gitleaks / Playwright）。
+秘密情報のコミットは、gitleaks の pre-commit フック（`git config core.hooksPath scripts/git-hooks`。ホストに `brew install gitleaks`）で止めている。
 
 ## ドキュメント
 

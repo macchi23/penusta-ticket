@@ -85,3 +85,6 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | 記事の公開前チェック（構成メモ）に「記事が案内する立ち上げ手順を、clone 直後の別ディレクトリで通す」を足す案。再構築手順に `composer install` と `cp .env` が無く、public の clone からは通らない見込みだった（1-2 の裏取りで researcher が指摘） | 1 | 2026-10-17 | 候補 |
 | 定義修正 | verifier が `scripts/check.sh all` の出力を `tail -n 200` で切り、pint の結果を落とした（メインが pint を再実行して確認）。verifier.md に「各セクションの成否行を拾う（grep で PASS/FAIL を抽出する、など）」を足す案 | 1 | 2026-10-17 | 候補 |
 | 定義修正 | 記事の事実確認ブリーフに「数値や向き（A が X、B が Y）は、元のレビュー記録やコミットで裏を取る」を入れる案。dev-notes が「8.4.24 / 8.4.26」と向きを書いておらず、下書きで逆に書いた（1-2 の事実確認で検出）。dev-notes 側にも向きを書いた | 1 | 2026-10-17 | 候補 |
+| hook | gitleaks: pre-commit フック（`scripts/git-hooks/pre-commit`）でステージ分、`scripts/check.sh secrets` で全履歴と記事の下書きを検査。ARN 中のアカウント ID のルール付き（`.gitleaks.toml`）。public リポジトリは一度漏れたら取り消せないので、発生を待たずに入れた（ユーザー判断）。Docker 実行版は `git commit -a` / worktree ですり抜けたためホストのバイナリに変えた（レビューで検出） | 0 | 2026-10-18 | 採用 |
+| 定義修正 | code-reviewer の観点に「Docker 経由でホストの git を扱うスクリプトは、ホストの環境変数（GIT_INDEX_FILE）とマウント外の gitdir（worktree）が見えず、静かに成功する」を足す案（gitleaks のレビューで検出） | 1 | 2026-10-18 | 候補 |
+| check | `set -o pipefail` の下の `printf ... \| grep -q` は、出力が大きいと SIGPIPE で条件が偽になり見逃す。`shell` 検査で grep する候補（gitleaks の ERR 判定で検出、`case` に置き換えた） | 1 | 2026-10-18 | 候補 |
