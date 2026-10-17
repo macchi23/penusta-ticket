@@ -40,11 +40,11 @@
 ```bash
 cp backend/.env.example backend/.env          # DEMO_AUTH_ENABLED=true に書き換える（デモ用ユーザー切替を有効にする）
 docker compose up -d --build
-docker compose exec app composer install
+docker compose exec app composer install       # 終わるまで scheduler は vendor が無くて再起動を繰り返すが、終われば自動で戻る
 docker compose exec app php artisan key:generate
 docker compose exec app php artisan migrate:fresh --seed --force   # スタジアム・7 シーズン分の試合・管理者
 # 取引データ（利用者・注文・リセール・行動ログ）。USE_ZEND_ALLOC=0 は大量 insert で起きる heap 破損（原因未特定）を避けるため
-docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data
+docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data   # 今シーズン分。分析用の全量は --seasons=7
 ```
 
 | URL | 用途 |
