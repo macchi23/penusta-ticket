@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 検証の一本化。使い方: scripts/check.sh [backend|frontend|shell|secrets|e2e|infra|all]
-# secrets は gitleaks で全履歴と追跡外の記事の下書きを検査する（all に含む）
+# secrets は gitleaks で全履歴と docs/private（ignore 済みの private リポジトリ）を検査する（all に含む）
 set -uo pipefail
 cd "$(dirname "$0")/.." || exit 2
 

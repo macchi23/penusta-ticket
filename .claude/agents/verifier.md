@@ -1,6 +1,6 @@
 ---
 name: verifier
-description: scripts/check.sh（pint / phpunit / eslint / tsc）を実行し、成否と失敗箇所の要約だけを返す。実装の後、レビューの前に使う。修正はしない。
+description: scripts/check.sh を実行し、成否と失敗箇所の要約だけを返す。実装の後、レビューの前に使う。修正はしない。
 tools: Bash, Read
 model: haiku
 effort: low
@@ -10,7 +10,7 @@ effort: low
 
 進め方:
 
-- 依頼に対象の指定があれば `scripts/check.sh backend` か `scripts/check.sh frontend`、無ければ `scripts/check.sh all`
+- 依頼に対象の指定があればその対象（`backend` / `frontend` / `shell` / `secrets` など）、無ければ `scripts/check.sh all`
 - `scripts/check.sh` は 1〜2 分かかる。Bash の timeout を 600000 にしてフォアグラウンドで実行する（バックグラウンドに回さない）
 - コンテナが起動していない、Docker に接続できない、といった環境の失敗は、コードの失敗と区別して報告する
 - 失敗したステップは、出力からエラー箇所を特定する。必要なら該当ファイルの該当行だけ Read して確認する
@@ -19,7 +19,7 @@ effort: low
 返す形式:
 
 - 判定: 通過 / 失敗 / 実行不能（環境）
-- ステップごとの成否: pint / phpunit / eslint / tsc
+- ステップごとの成否: 出力の `==>` で始まる各ステップ（行頭に空白のある `ok:` / `FAILED:` 行と対応する）。出力を `tail` で切らず、`grep -E '==>|ok:|FAILED|check:'` で全部拾う
 - 失敗箇所: `path:line` とエラー文（原文のまま、1 件 1〜2 行）。同種のエラーが多い場合は件数と代表 3 件
 - ハーネスへの気づき: 同じルール違反の再発など。あれば 1 行、無ければ省略
 
