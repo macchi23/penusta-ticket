@@ -65,6 +65,7 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
 - Qiita 連載「架空サカスタのチケットサイトで学ぶ」
   - [（0）ゴール裏年パス勢が、架空スタジアムのチケットサイトを作る理由](https://qiita.com/macchi23/items/5b9f5670c841f5c41be8)
   - [（1）スタジアムの座席をどうテーブルにするか](https://qiita.com/macchi23/items/b6cf889842beba4f5f6a)
+  - [（2）コンテナの中の localhost は届かない](https://qiita.com/macchi23/items/8a8141361ed0115fc08f)
 
 ## ライセンス
 
