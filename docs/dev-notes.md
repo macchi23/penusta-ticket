@@ -15,7 +15,7 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
 - 投入済みデータ（2026-10-11、`--seasons=7`）: 7 シーズン 123 試合（2026-27 は finished 5 / 販売途中 3 / 未販売 11）/
-  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 9 万 + 管理者 1 / 注文 81 万 / チケット 145 万 / イベント 603 万。
+  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 9 万 + 管理者 1 / 注文 91.9 万 / チケット 155.5 万（2026-10-25 に数え直し）/ イベント 603 万（2026-10-11 時点）。
   合成データの仕様・規模・特徴量の約束は [demo-data.md](demo-data.md)
 - 管理画面 http://localhost:3100/admin （ユーザー切替で先頭の「管理者」を選ぶ）で試合ごとの割当を塗り替えられる（下の「割当エディタ」）
 - events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
@@ -186,7 +186,7 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - 二重販売防止: 指定席は部分ユニーク `tickets (match_id, seat_id) WHERE seat_id IS NOT NULL AND status NOT IN ('released','expired','resold')`
   に `ON CONFLICT DO NOTHING` で当てる。自由席は `match_block_allocations` の行を `FOR UPDATE` して capacity を数える。
   ロック順は「カート行 → allocation 行 → tickets」で統一（`CartService` / `DbUnreservedStock` / `CheckoutService`）。
-  2026-10-06 から指定席も allocation 行を `FOR SHARE` で取る（下の「割当エディタ」のロック設計）
+  2026-10-05 から指定席も allocation 行を `FOR SHARE` で取る（下の「割当エディタ」のロック設計）
 - 期限はカート単位（`orders.expires_at`、各 ticket にコピー、既定 10 分 = `config/ticketing.php`）。
   正しさは残席計算・席状態・確定時の時刻条件（`expires_at > now`）で保証し、`tickets:expire-holds`（毎分）は状態の整理
 - 差し替え点（`backend/app/Services/`）: `Purchase/FirstComeSaleMethod`（販売方式）、`Purchase/DbUnreservedStock`（自由席在庫）、
@@ -210,6 +210,7 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - 期限切れ直後に同じ席を取り直すと、1 ユーザーが席を占有し続けられる。本物の認証を入れる前に、取り直し制限か waiting room で対処
 - `CheckoutService` の `charge()` が `DB::transaction(..., 3)` の再試行 closure 内にある。実決済に差し替えるときは
   order id を idempotency key として gateway に渡し、charge 後は再試行しない構成にする。ロックを持ったまま外部 API を呼ぶ形も見直す
+  （`CheckoutService` のコメントは「差し替えるときもロックを持ったまま行う」で、今の方針はこちら。見直すかは未定）
 - `MockPaymentGateway` は具象クラスの直接注入で、既定が success（fail-open）。実決済へ移るときは interface 経由で bind し、
   モックは local / testing でだけ解決できるようにする
 - 仮押さえ後に `match_prices` が変わると、確定時に再計算するため画面の金額と請求額が食い違う。価格変更の通知か再確認の画面が要る
@@ -217,9 +218,8 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
   実質 user / session 単位。実 IP で制限するなら frontend から `X-Forwarded-For` を渡し、TrustProxies を設定する
 - `Order` / `Ticket` の `$fillable` に `status` / `total` / `expires_at` が入っている。今はリクエスト配列を `fill` していないが、
   今後の実装でもサーバー側で決めた値だけを渡すこと（code-reviewer / security-reviewer の確認項目）
-- 販売条件にキックオフ時刻を入れていない。`status` を `finished` に変える処理も無いので、`on_sale` の試合はキックオフ後も買える
-  （2026-10-09 の security-reviewer で再指摘。7 シーズン化で AS_OF 直後に販売中の試合が並ぶので表に出やすい）。割当編集はキックオフで止まるので基準が食い違う。
-  条件は `FirstComeSaleMethod::assertSellable` に足すか、キックオフで `finished` にする処理を置く。購入フローの変更なので Fable レビュー
+- （解消）キックオフ後も買える件: 販売フェーズ（2026-10-11）で一般販売の `ends_at = kickoff_at` になり、`SaleGate` が `[starts_at, ends_at)` で判定するので
+  キックオフ後は買えない（`SaleGateTest`）。販売可否の判定は `SaleConditions::assertSellable`。`status` を `finished` に変える処理は今も無い
 - 本番相当の設定（`APP_ENV=production`、`DEMO_AUTH_ENABLED=false`）で demo guard と `/api/demo/*` が閉じることはテストで確認済み。
   本物の認証は `auth:demo` を `auth:sanctum` に書き換えるのが入口
 - `now` はロック取得後に取る（`CheckoutService` / `CartService` とも）。サービスが使った `now` を戻り値（`CheckoutResult` / `CartChange` /

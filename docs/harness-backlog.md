@@ -88,3 +88,6 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | hook | gitleaks: pre-commit フック（`scripts/git-hooks/pre-commit`）でステージ分、`scripts/check.sh secrets` で全履歴と記事の下書きを検査。ARN 中のアカウント ID のルール付き（`.gitleaks.toml`）。public リポジトリは一度漏れたら取り消せないので、発生を待たずに入れた（ユーザー判断）。Docker 実行版は `git commit -a` / worktree ですり抜けたためホストのバイナリに変えた（レビューで検出） | 0 | 2026-10-18 | 採用 |
 | 定義修正 | code-reviewer の観点に「Docker 経由でホストの git を扱うスクリプトは、ホストの環境変数（GIT_INDEX_FILE）とマウント外の gitdir（worktree）が見えず、静かに成功する」を足す案（gitleaks のレビューで検出） | 1 | 2026-10-18 | 候補 |
 | check | `set -o pipefail` の下の `printf ... \| grep -q` は、出力が大きいと SIGPIPE で条件が偽になり見逃す。`shell` 検査で grep する候補（gitleaks の ERR 判定で検出、`case` に置き換えた） | 1 | 2026-10-18 | 候補 |
+| 定義修正 | fable が使えない間（2026-10-25〜）は、販売の整合性に関わる変更を opus の code-reviewer と security-reviewer の並列で代える注記を CLAUDE.md と `/step` に入れた。fable が戻ったら注記を外す | 1 | 2026-10-25 | 候補 |
+| skill | 記事の素材に dev-notes を使う前に、researcher にコードとの照合をさせる手順（1-2・1-3 とも、後の機能追加で直った申し送りや古い件数が残っていた） | 2 | 2026-10-25 | 候補 |
+| check | `scripts/check.sh` が frontend コンテナの停止に気づかず、eslint / typegen / tsc が `service "frontend" is not running` で落ちる。先に起動状態を確認して環境の失敗として出す案（verifier の指摘） | 1 | 2026-10-25 | 候補 |

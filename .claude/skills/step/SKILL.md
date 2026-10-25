@@ -23,7 +23,7 @@ description: 方針が決まった 1 ステップ分を「implementer → verifi
 
 - `code-reviewer` に仕様と diff の範囲だけを渡す。implementer の説明は渡さない
 - 認証・認可、決済、ユーザー入力の受け口、管理画面、同時実行制御に触れたら `security-reviewer` も並列で
-- 販売の整合性に関わる変更はレビューを fable に上げる
+- 販売の整合性に関わる変更はレビューを fable に上げる（2026-10-25 から当面 fable は使えないので、opus のまま code-reviewer と security-reviewer を並列で必ず走らせる）
 - verifier とレビューは並列に走らせてよい（レビューは読み取りのみ）
 
 ## 4. 差し戻し（最大 2 往復）

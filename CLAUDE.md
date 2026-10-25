@@ -40,6 +40,7 @@
 - `implementer` を opus に上げる: sonnet の実装が同じ指摘でレビューを 2 回差し戻されたとき
 - レビューを fable に上げる: 販売の整合性に関わる変更（二重販売防止、仮押さえの期限処理、自由席 capacity の同時実行制御、
   抽選、waiting room、決済の状態遷移）、またはユーザーが明示したとき
+  - 2026-10-25 から当面 fable は使えない。その間は opus のまま code-reviewer と security-reviewer を並列で必ず走らせる（fable が戻ったらこの注記を外す）
 
 ## 標準の流れ
 
