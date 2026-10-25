@@ -7,7 +7,7 @@
 
 - artisan / composer / npm はコンテナ経由（`docker compose exec app ...` / `docker compose exec frontend ...`）。ホストの PHP は使えない
 - 公開しないドキュメントは `docs/private/` 配下にカテゴリごとのディレクトリを切って置く。`docs/private/` は public 側で ignore 済みの別の private リポジトリ（penusta-private）なので、中で別にコミット・push する
-- Qiita 記事は `docs/private/articles/`（構成メモ、管理表、公開済みの回）。下書きは `drafts/` に書き、公開したら同じリポジトリ内で移す（`docs/private/articles/README.md`）。public 側では README の記事一覧に Qiita のリンクを足す
+- Qiita 記事は `docs/private/articles/`（構成メモ、管理表、公開済みの回）。下書きは `drafts/` に書き、公開したら同じリポジトリ内で移す（`docs/private/articles/README.md`）。public 側では README の記事一覧に Qiita のリンクを足す。1 本の進め方は `/article <回>`
 - 例外: E2E（`e2e/`）はホストで実行する（`scripts/check.sh e2e`。初回は `cd e2e && npm ci && npx playwright install chromium`）
 - 例外: CDK（`infra/`）と実 AWS 向けの aws CLI はホストで実行する（`scripts/check.sh infra`。初回は `cd infra && npm ci`）。プロファイルは `personal-dev-admin`（`aws sso login --profile personal-dev-admin`）
 - 実 AWS への書き込み（`cdk deploy` / `destroy`、S3 への同期、Athena の DDL）はメインがユーザーに確認してから実行する。サブエージェントは synth と読み取りまで
