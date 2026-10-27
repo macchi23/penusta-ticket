@@ -58,7 +58,7 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
    React の dev 専用計測の既知のバグ（facebook/react #37561、vercel/next.js #86060 / #99032）。この環境では、Docker の VM が止まっていた間
    `next-server` の単調クロックが進まず、実時間から遅れていた（何が VM を止めたかは未確認。Mac のスリープと推測）。`docker compose restart frontend` で解消する。production には計測コードが無い。
    E2E で `pageerror` を拾う場合は実行前に再起動する。
-9. **app コンテナが固まって止められなくなることがある**（2026-10-13 に 1 回。原因は未特定）。
+9. **app コンテナが固まって止められなくなることがある**（2026-10-13、2026-10-27 の 2 回。原因は未特定）。
    症状: `GenerateDemoDataTest` の実行中に、コンテナ内の `php artisan` / `phpunit` / `require vendor/autoload.php` が CPU 0 のまま返らなくなる
    （`php -r 'echo 1;'` は通る。DB 側に実行中のクエリは無い）。`kill -9` でも消えず、`docker compose ps` は Up のまま。
    その後は `docker compose exec` が `error executing setns process: exit status 1`、`docker compose restart app` や
@@ -66,6 +66,11 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
    復旧: Docker Desktop を再起動（メニューの Restart、効かなければ Quit して起動し直す）→ `docker compose up -d`。
    作り直しに失敗した直後だと app が `<id>_penusta-ticket-app-1` という一時名で上がるので、`docker compose up -d --force-recreate --no-deps app`
    で正規の名前に戻す。app は状態を持たない（`./backend` をマウントしているだけ）ので作り直しても失うものは無く、DB のデータはボリュームに残る
+   2 回目（2026-10-27）の症状: localhost:3100 が応答しない（Next.js が API を待って固まる）。app の中で `head /var/www/html/artisan` すら返らず、
+   `php -r` は通る。2 回ともバインドマウントのファイルを読むところで止まっている。当時のファイル共有は gRPC FUSE だった。
+   Docker Desktop の再起動 → `docker compose up -d` で復旧し、同日にファイル共有を VirtioFS（Docker Desktop の既定）へ切り替えた。
+   これで再発しなくなるかは未確認。切り替わったかは `~/Library/Containers/com.docker.docker/Data/log/host/com.docker.backend.log` の
+   `FileSharingTypeMac` で見る（4.97 では `settings-store.json` の `UseGrpcfuse` は古い値のまま残り、当てにならない）
 10. **秘密情報の検査は gitleaks（ホストのバイナリ）**: pre-commit フック（`scripts/git-hooks/pre-commit`）でステージ分、`scripts/check.sh secrets` で全履歴と
    `docs/private/`（ignore 済みの別の private リポジトリ。記事の下書きなど）を見る。有効化は `git config core.hooksPath scripts/git-hooks`（相対パスなので、チェックアウト中のツリーのフックが動く）。
    フックを含まないコミット（導入前のコミットからのブランチ、rebase の edit で古いコミットに止まったとき）の上では、git はフックを黙って飛ばす。
