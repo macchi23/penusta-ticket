@@ -91,3 +91,5 @@ hooks / skills / 定義修正の候補を記録する。運用ルールは `CLAU
 | 定義修正 | fable が使えない間（2026-10-25〜）は、販売の整合性に関わる変更を opus の code-reviewer と security-reviewer の並列で代える注記を CLAUDE.md と `/step` に入れた。fable が戻ったら注記を外す | 1 | 2026-10-25 | 候補 |
 | skill | 記事の素材に dev-notes を使う前に、researcher にコードとの照合をさせる手順（1-2・1-3 とも、後の機能追加で直った申し送りや古い件数が残っていた）。2026-10-25: 記事 1 本の流れ全体（素材集め → 下書き → 事実確認 → 公開前チェック → 公開後の後片付け）に広げて採用 | 2 | 2026-10-25 | 採用（`.claude/skills/article/SKILL.md`） |
 | check | `scripts/check.sh` が frontend コンテナの停止に気づかず、eslint / typegen / tsc が `service "frontend" is not running` で落ちる。先に起動状態を確認して環境の失敗として出す案（verifier の指摘） | 1 | 2026-10-25 | 候補 |
+| 定義修正 | `docker compose exec` を `< /dev/null` なしでバックグラウンド実行すると stdin 待ちで固まったように見え、コンテナ自体の固まり（注意点 9）と切り分けにくい。implementer.md / verifier.md に「バックグラウンドの exec は `-T` か `< /dev/null`」を足す案（2026-10-13 の S5 の implementer。報告が 10/27 に遅れて届いた） | 1 | 2026-10-27 | 候補 |
+| 環境 | 「Tests: が出るまで待つ」監視ループが、待ち先のファイルが消えたあとも 13 日間 3 秒おきに回り続けていた（/exit 時の確認で発覚して止めた）。監視ループには上限時間を付ける | 1 | 2026-10-27 | 候補 |
