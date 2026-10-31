@@ -67,6 +67,7 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
   - [（1）スタジアムの座席をどうテーブルにするか](https://qiita.com/macchi23/items/b6cf889842beba4f5f6a)
   - [（2）コンテナの中の localhost は届かない](https://qiita.com/macchi23/items/8a8141361ed0115fc08f)
   - [（3）チケットの二重販売をどう防ぐか](https://qiita.com/macchi23/items/aa4cd6f139a90e276f93)
+  - [（番外 1）Claude Code をサブエージェントで分業させ、仕組みは台帳で育てる](https://qiita.com/macchi23/items/f321a699d61b38cd7636)
 
 ## ライセンス
 
