@@ -1,4 +1,4 @@
-import { pickAdmin, pickEditableUnsoldMatch, pickOnSaleMatch, pickReservedBlock, pickUsers } from './lib/api';
+import { pickAdmin, pickEditableOnSaleMatch, pickOnSaleMatch, pickReservedBlock, pickUsers } from './lib/api';
 
 const FRONT = 'http://localhost:3100';
 
@@ -25,7 +25,7 @@ export default async function globalSetup(): Promise<void> {
     const adminId = await pickAdmin();
     const [customerId] = await pickUsers(1);
     const as = (id?: number) => (id === undefined ? {} : { headers: { Cookie: `penusta_demo_user=${id}` } });
-    const adminMatch = await pickEditableUnsoldMatch(adminId);
+    const adminMatch = await pickEditableOnSaleMatch(adminId);
     await fetch(`${FRONT}/admin`, as(adminId));
     await fetch(`${FRONT}/admin/matches/${adminMatch}/allocations`, as(adminId));
     await fetch(`${FRONT}/admin`, as(customerId));

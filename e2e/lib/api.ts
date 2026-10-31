@@ -39,17 +39,39 @@ async function getJson<T>(userId: number | undefined, path: string): Promise<T> 
 // 実行中にフェーズが切り替わらないよう、現フェーズの終了まで 1 時間以上ある試合に絞る
 const HOUR = 3600_000;
 
-export async function pickOnSaleMatch(): Promise<number> {
-  const { data } = await getJson<{
-    data: { id: number; status: string; sale_phases: { kind: string; starts_at: string; ends_at: string }[] }[];
-  }>(undefined, '/api/matches');
-  const now = Date.now();
-  const m = data.find(
-    (x) =>
-      x.status === 'on_sale' &&
-      x.sale_phases.some((p) => p.kind === 'general' && Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at)),
+type OnSaleCandidate = {
+  id: number;
+  status: string;
+  sale_phases: { kind: string; starts_at: string; ends_at: string }[];
+};
+
+function isOnSaleNow(m: OnSaleCandidate, now: number): boolean {
+  return (
+    m.status === 'on_sale' &&
+    m.sale_phases.some((p) => p.kind === 'general' && Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at))
   );
-  if (!m) throw new Error('一般販売中の on_sale の試合がない');
+}
+
+// 一般販売中の試合が無いときの止めメッセージ。いつまで回せないかを、次の一般販売開始（JST）で示す
+export function noOnSaleMatchMessage(matches: OnSaleCandidate[], now: number): string {
+  let next: { id: number; startsAt: number } | null = null;
+  for (const m of matches) {
+    for (const p of m.sale_phases) {
+      const startsAt = Date.parse(p.starts_at);
+      if (p.kind === 'general' && startsAt > now && (next === null || startsAt < next.startsAt)) next = { id: m.id, startsAt };
+    }
+  }
+  const head = '一般販売中の試合が無い期間なので E2E は回せない（開発 DB の日付に依存する）。';
+  if (!next) return `${head}販売予定の試合が無い（シーズンの販売が終わった）。シードの日付を確認`;
+  const jst = new Date(next.startsAt + 9 * HOUR).toISOString().slice(0, 16).replace('T', ' ');
+  return `${head}次の一般販売開始は ${jst} JST（試合 ${next.id}）`;
+}
+
+export async function pickOnSaleMatch(): Promise<number> {
+  const { data } = await getJson<{ data: OnSaleCandidate[] }>(undefined, '/api/matches');
+  const now = Date.now();
+  const m = data.find((x) => isOnSaleNow(x, now));
+  if (!m) throw new Error(noOnSaleMatchMessage(data, now));
   return m.id;
 }
 
@@ -203,7 +225,7 @@ export async function patchAllocations(
   }
 }
 
-export async function pickEditableUnsoldMatch(adminId: number): Promise<number> {
+export async function pickEditableOnSaleMatch(adminId: number): Promise<number> {
   const { data } = await getJson<{
     data: { id: number; editable: boolean; status: string; sale_phases: { starts_at: string; ends_at: string }[] }[];
   }>(adminId, '/api/admin/matches');
@@ -218,8 +240,8 @@ export async function pickEditableUnsoldMatch(adminId: number): Promise<number> 
     if (unlockedUnreserved.length >= 2) return m.id;
   }
   throw new Error(
-    '条件を満たす試合が無い。未ロックの自由席ブロックが 2 つ以上ある試合を探してください。' +
-    'dev DB のシード（migrate:fresh --seed）か、kickoff 日付（2027-06 以降は全試合キックオフ済みになる）を確認',
+    '条件を満たす試合が無い。販売フェーズ中・editable・未ロックの自由席ブロックが 2 つ以上、をすべて満たす試合が要る。' +
+    'dev DB のシード（migrate:fresh --seed）と日付を確認',
   );
 }
 
@@ -268,16 +290,9 @@ export async function pickBlockOf(matchId: number, type: 'reserved' | 'unreserve
 
 // リセールの E2E 用。キックオフが十分先（締切の 150 分前を過ぎない）で、一般販売中の on_sale の試合
 export async function pickResaleMatch(): Promise<number> {
-  const { data } = await getJson<{
-    data: { id: number; status: string; kickoff_at: string; sale_phases: { kind: string; starts_at: string; ends_at: string }[] }[];
-  }>(undefined, '/api/matches');
+  const { data } = await getJson<{ data: (OnSaleCandidate & { kickoff_at: string })[] }>(undefined, '/api/matches');
   const now = Date.now();
-  const m = data.find(
-    (x) =>
-      x.status === 'on_sale' &&
-      Date.parse(x.kickoff_at) > now + 150 * 60_000 + HOUR &&
-      x.sale_phases.some((p) => p.kind === 'general' && Date.parse(p.starts_at) <= now && now + HOUR < Date.parse(p.ends_at)),
-  );
+  const m = data.find((x) => isOnSaleNow(x, now) && Date.parse(x.kickoff_at) > now + 150 * 60_000 + HOUR);
   if (!m) throw new Error('リセールを試せる試合がない（一般販売中で、キックオフが 3.5 時間以上先の on_sale）');
   return m.id;
 }
