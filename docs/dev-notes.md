@@ -207,8 +207,8 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
   `POST /cart/items` の `{block_id}`（1 枚追加）も残っているが frontend からは使っていない
 - 同時実行の確認は `RefreshDatabase` ではできない。開発環境に同じ席へ並列 POST して 201 が 1 件になることを確認した
   （2026-10-03、8 並列）。自由席の並列は未確認。
-  ロックの待ち合いは 2026-10-06 から PHPUnit で検証している（`tests/Concerns/UsesProbeConnection`。下の「割当エディタ」）
-- E2E は `e2e/`、開発 DB を使い 1 回に 1 席 paid が残る。events は `session_id LIKE 'e2e00000-0000-4000-8000-%'` で除外できる
+  ロックの待ち合いは 2026-10-05 から PHPUnit で検証している（`tests/Concerns/UsesProbeConnection`。下の「割当エディタ」）
+- E2E は `e2e/`、開発 DB を使い 1 回に paid が 4 枚、割当の監査表が 5 行（change_set 4 件）増える（2026-11-01 実測）。events は `session_id LIKE 'e2e00000-0000-4000-8000-%'` で除外できる
 
 ## 購入フローの申し送り（レビューで出て、骨格では見送った点）
 
@@ -233,7 +233,7 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
 - 「同じトランザクション内で解放してから取り直す」処理は仮押さえの延長に化けやすい（`setUnreservedQuantities` で一度出て修正済み）。
   今後 Redis 版などを作るときも、期限の付け直しは「操作前に有効な held が 0 件」の条件で判定する
 
-## 割当エディタ（2026-10-06）
+## 割当エディタ（2026-10-05〜06）
 
 管理者が試合ごとにブロックの割当（home / away / buffer / closed）を変える。画面は `/admin` → `/admin/matches/{id}/allocations`
 （座席図の上でブラシを選んで塗り、差分を保存）。結果は一般利用者の座席図と購入可否にそのまま効く。
@@ -255,7 +255,8 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
   サービス（`isAdmin()`）と FormRequest でも再検査する。demo が無効なら `auth:demo` で 401 になり、admin も閉じる
 - 編集ルールは試合の状態ではなくチケットの有無で決める。consuming（paid か期限内の held）が 1 枚でもあるブロックは変更を拒否する。
   期限切れの held は数えない。キックオフ後の試合は読み取り専用。1 回の保存は全件適用か全件拒否
-  - dev の合成データは全試合の home / away に paid があるので、緩衝帯の拡大を試せるのは未販売の 2 試合だけ
+  - dev の合成データでは、販売済みの試合は home / away に paid がある。未販売の試合もホームのブロックは年パスの paid でロックされるので、
+    編集できるのはアウェーの自由席と緩衝帯だけ（2026-11-01 時点で未販売 11 試合、各 56 ブロック中 9）
   - ブロック単位の属性なので「空き席だけに適用」はできない。やるなら席単位の割当が要る
 - 楽観的な同時編集: PATCH はブロックごとに `expected`（画面に見えていた値）を送り、現在値と違えば 409 `stale`。
   差分だけを送るので、触っていないブロックは競合しない
@@ -292,7 +293,8 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
 - `tests/Concerns/UsesProbeConnection`: 別接続 `probe` で行を握り、本接続に `lock_timeout=200ms` をかけて「待たされる / 通る」を判定する。
   `DB::connection()->beforeExecuting` で「ロック直前に別接続がコミットした」状況を作れる。`DatabaseTruncation` は終了時に自分で truncate する
   （残すと後続の `RefreshDatabase` 系の件数が壊れる）
-- `AllocationLockTest`（購入側）、`AllocationChangeServiceTest`（管理者側）、`Admin/AdminAllocationApiTest`、`Admin/BusyConversionTest`
+- `AllocationLockTest`（購入側）、`AllocationChangeServiceTest`（管理者側）、`Admin/AdminAllocationApiTest`、`Admin/BusyConversionTest`、`AdminRoleTest`。
+  `UsesProbeConnection` はリセール（`ResaleCartConcurrencyTest`）と年パス発行（`SeasonPassIssuerConcurrencyTest`）でも使っている
 - E2E `e2e/tests/admin-allocations.spec.ts`: 403 / 401、塗って保存、一般利用者の購入不可、ロック表示、他の管理者との競合。
   `afterAll` でカートと割当を開始時の値に戻す。入口（画面上部のユーザー切替を操作してからの 403 / 401、管理画面を開いたまま一般ユーザーに
   切り替えると権限なしの表示に変わる、`/matches/admin` の 404）は割当に依存しないので別の describe に分けている
@@ -301,7 +303,9 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
 
 ### 申し送り
 
-- E2E は未販売の試合に依存する。2026-27 最終節（2027-06）のキックオフを過ぎると編集できる試合が無くなり、`pickEditableUnsoldMatch` が理由付きで落ちる。
+- E2E は開発 DB の「今」一般販売中の試合に依存する。2026-12-06 14:00 JST（match 114 の一般販売終了）から 2027-01-16 14:00 JST（match 115 の開始）までと、
+  最終節（2027-05-29）の一般販売が終わった後は該当が無く、`global-setup` の `pickOnSaleMatch` が次の販売開始日時を添えて止める。
+  管理画面の spec は販売中の試合から `pickEditableOnSaleMatch` で選ぶ（緩衝帯を一般利用者が買えないことを確かめるため）。
   `AddUnsoldMatchesSeeder` は廃止した（MatchSeeder が DemoScenario から 7 シーズン分を作る）。`DemoScenario::AS_OF_JST` を進めて再シードする
 - 一般利用者の座席図の「購入不可」は色とカーソルだけで、文言が無い（E2E は `data-allocation` で見ている）
 - ルートの `app/not-found.tsx`（日本語）を足した。それまでは `/matches/admin` のような打ち間違いで Next 既定の英語の 404 が出て、
