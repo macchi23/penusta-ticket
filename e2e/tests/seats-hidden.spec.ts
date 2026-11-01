@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { pickBlockOf, pickHiddenMatch } from '../lib/api';
+import { useE2eSession } from '../lib/session';
 
 let matchId: number;
 let reservedId: number;
@@ -11,7 +12,8 @@ test.beforeAll(async () => {
   unreservedId = await pickBlockOf(matchId, 'unreserved');
 });
 
-test('未ログインでは指定席の席グリッドと自由席の残席が出ない', async ({ page }) => {
+test('未ログインでは指定席の席グリッドと自由席の残席が出ない', async ({ page, context }) => {
+  await useE2eSession(context);
   await page.goto(`/matches/${matchId}?block=${reservedId}`);
   await expect(page.getByTestId('seats-hidden')).toBeVisible();
   await expect(page.locator('[data-testid^="seat-"]')).toHaveCount(0);

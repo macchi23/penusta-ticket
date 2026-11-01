@@ -21,11 +21,11 @@ use LogicException;
 /**
  * 管理者による試合×ブロックの割当変更。全件適用か全件拒否。
  *
- * ロック順は購入側と揃える: orders → allocation 行 → tickets。ここでは allocation 行を block_id 昇順に FOR UPDATE する。
+ * ロック順は購入側（orders → allocation 行 → tickets）の部分列にする。ここでは allocation 行だけを block_id 昇順に FOR UPDATE する。
  * 購入側は allocation ロック保持中にしかチケットを consuming にしないので、ロック後の tickets の数は確定する（tickets はロックしない）。
  *
- * 最上位のトランザクションとして呼ぶこと。SET LOCAL lock_timeout が外側のトランザクションに残り、
- * 55P03 で abort したトランザクションを外側が引き継いでしまうため、トランザクション内からの呼び出しは LogicException にする。
+ * 最上位のトランザクションとして呼ぶこと。入れ子だと SET LOCAL lock_timeout が savepoint を越えて外側の終わりまで残り、
+ * デッドロックも Laravel が再試行せず外側ごと失敗させるため、トランザクション内からの呼び出しは LogicException にする。
  */
 class AllocationChangeService
 {
