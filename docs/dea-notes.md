@@ -552,3 +552,29 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **採らなかった選択肢**
 - Redshift Serverless: 使った分だけの課金で、管理も不要。ただ、データの読み込みか Spectrum の設定が要る。S3 をたまに調べるだけなら Athena が最短
 - Athena の federated query: RDS や DynamoDB など S3 以外もまたいで SQL を流したいときの選択肢
+
+### 15-4. 移行と連携（DMS / SCT / AppFlow / DataSync / Transfer Family / Snowball）
+
+**判断ルール**
+- DB の移行で停止時間を最小に → DMS の全件ロード + CDC（変更データキャプチャ）。停止時間を小さくするのは CDC で、切り替え時は最後の差分が追いつくまでだけ止める
+- 異種間の移行（Oracle → PostgreSQL など） → スキーマを SCT（または DMS Schema Conversion）で変換してから DMS。同種間なら SCT は不要
+- SaaS（Salesforce、SAP、Slack など）から S3 / Redshift へ、コードなし → Amazon AppFlow
+- オンプレミスの NFS / SMB から S3 / EFS / FSx へ、一括 + 定期の差分、整合性の確認 → DataSync（エージェント、タスクのスケジュール、チェックサムでの検証）。AWS のストレージ間やほかのクラウドからの転送にも使う
+- 外部の取引先が SFTP / FTPS / FTP で S3 にファイルを置く → Transfer Family
+- 回線が細く、オンラインだと数週間かかる → Snowball Edge（オフラインで一度きり）。目安: 10Gbps なら 50TB は理論上約 11 時間（50TB × 8 ÷ 10Gbps）
+
+**ひっかけ**
+- 「AppSync で SaaS から取り込む」→ AppSync は GraphQL の API を作るサービス。取り込みは AppFlow（Flow = 流す）
+- 「DMS の全件ロードだけで停止時間は最小」→ ロード中の更新は CDC が無いと拾えない
+- 「DataSync で SaaS から取り込む」→ DataSync はストレージ間の転送。SaaS の API には AppFlow
+- 「`aws s3 sync` の cron で十分」→ s3 sync も差分は送るが、チェックサムの検証、並列化と帯域の制御、スケジュール・再試行・監視を自分で作ることになる
+- 「Snowball で差分も」→ 一度きりのオフライン転送。継続の差分は DataSync
+- 「Transfer Family で社内のファイルサーバーを移行」→ 外部から SFTP で受け取る入口
+
+**問題文のキーワード**
+- 「停止時間を最小」「切り替えまで更新を反映」→ DMS + CDC
+- 「異なるデータベースエンジン」→ SCT / DMS Schema Conversion
+- 「SaaS」「Salesforce」「コードなし」→ AppFlow
+- 「NFS / SMB」「ファイルサーバー」「スケジュール」「整合性の検証」→ DataSync
+- 「取引先」「SFTP」→ Transfer Family
+- 「帯域が限られる」「数十 TB〜PB」「オフライン」→ Snowball Edge
