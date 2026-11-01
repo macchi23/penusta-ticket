@@ -454,3 +454,39 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - Iceberg テーブルを CFn で作る: Glue カタログだけで管理する場合や書き込みがほぼ無い場合は選択肢になるが、ドリフトの扱いが要る
 - 標準のシンセサイザ（bootstrap あり）: Lambda などのアセットが要るときは必須
 - export 先を実 S3 に切り替える: app と scheduler が `.env` を共有しており、毎日実 AWS に書くことになる。SSO の期限切れと s3 ディスクの token キー欠落で動かない。今は RustFS → sync の 2 段
+
+## 15. サービス選択の比較（問題演習から）
+
+2026-11-01 から、比較に絞った状況問題を解いて足していく章。ペヌスタで使っていないサービスが中心なので「ペヌスタでの使い方」は、関係があるときだけ書く。
+
+### 15-1. ストリームの取り込みと処理（Kinesis Data Streams / Firehose / Managed Service for Apache Flink）
+
+**ペヌスタでの使い方**
+- 今はイベントログを 1 日 1 回 `events:export` で S3 互換ストレージに書くバッチだけ（10. バッチとストリーミング）。試合ごとの販売枚数をリアルタイムに出すなら、Kinesis Data Streams + Managed Service for Apache Flink になる
+
+**判断ルール**
+- 複数のコンシューマーが独立に読む → Kinesis Data Streams。読む位置はコンシューマーごと（KCL は DynamoDB に保存）。データは読んでも消えない
+- キーごとの順序 → Kinesis Data Streams のパーティションキー。同じキーは同じシャードに入り、シャード内はシーケンス番号順
+- 読み直し（リプレイ） → Kinesis Data Streams の保持期間（既定 24 時間、延長で 7 日、最大 365 日）。AT_TIMESTAMP / TRIM_HORIZON から読める
+- 複数コンシューマーで低遅延 → 拡張ファンアウト。コンシューマーごとにシャードあたり 2MB/秒の専用の帯域、push 配信。無いとシャードあたり 2MB/秒と GetRecords 毎秒 5 回を取り合う
+- S3 / Redshift / OpenSearch に届ける、運用を最小に → Amazon Data Firehose。1 配信ストリームに宛先 1 つ
+- JSON を Parquet / ORC にして S3 へ → Firehose のレコード形式の変換（Glue Data Catalog のテーブル定義を使う）
+- ウィンドウ集計（タンブリング / スライディング / セッション）、リアルタイム分析、ストリームに SQL → Managed Service for Apache Flink（旧 Kinesis Data Analytics）。イベント時刻とウォーターマークを扱える
+
+**ひっかけ**
+- 「Firehose で複数のアプリに配る」→ Firehose は宛先に届けるだけで、アプリが位置を持って読む・読み直すことはできない
+- 「SQS の標準キュー + SNS のファンアウトで順序と読み直し」→ 標準キューは順序を保証しない。処理したら削除するので巻き戻せない（FIFO でも読み直しは不可）
+- 「S3 のイベント通知でストリーム処理」→ 単位はオブジェクトでイベントではない。1 秒未満の遅延は無理
+- 「Firehose → S3 → Athena を毎分でリアルタイム集計」→ バッチの繰り返し。遅れはバッファ + クエリで、小さなファイルが溜まり、毎分クエリ料金がかかる
+- 「Glue のバッチジョブを毎分スケジュール」→ 起動の待ちと最低課金があり向かない
+- 「EC2 に Kafka を立てる」→ 「インフラの管理を避けたい」に反する。Kafka が要るなら MSK
+
+**問題文のキーワード**
+- 「複数のコンシューマー」「再処理 / リプレイ」「順序」「1 秒未満」→ Kinesis Data Streams（+ 拡張ファンアウト）
+- 「S3 に配信」「運用を最小」「Parquet に変換」「数分の遅れは許容」→ Firehose
+- 「ウィンドウ」「リアルタイムの集計 / 異常検知」「ストリームに SQL」→ Managed Service for Apache Flink
+
+**採らなかった選択肢**
+- Lambda のタンブリングウィンドウ（Kinesis をイベントソースにして最大 15 分）: 単純な集計なら答えになりうる。問題文が「ウィンドウ集計」「リアルタイム分析」なら定番は Flink
+- Glue のストリーミング ETL: Spark Structured Streaming のマイクロバッチ。S3 への継続的な取り込みと変換には使える
+- MSK: 既存の Kafka クライアントやエコシステムを使いたいときに選ぶ
