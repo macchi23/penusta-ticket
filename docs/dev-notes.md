@@ -89,7 +89,7 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
 # S3 バケット（初回のみ）。aws CLI コンテナは compose の環境変数で RustFS を向く
 docker compose --profile tools run --rm -T aws s3 mb s3://penusta-events
 # イベントログのエクスポートと分析用 DB（任意）
-docker compose exec app php artisan events:export --from=2025-12-06 --to=2026-11-21
+docker compose exec app php artisan events:export --from=2021-01-10 --to=2026-10-31   # --to は前日（UTC）
 scripts/analytics.sh build
 ```
 
@@ -126,7 +126,7 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
 ```bash
 docker compose exec app php artisan events:export                      # 前日（UTC）分
 docker compose exec app php artisan events:export --date=2026-08-23
-docker compose exec app php artisan events:export --from=2025-12-06 --to=2026-11-21   # 全期間（合成データの範囲）
+docker compose exec app php artisan events:export --from=2021-01-10 --to=2026-10-31   # 全期間（7 シーズンの合成データは 2021-01-10 から。--to は前日 UTC）
 scripts/analytics.sh build     # raw → analytics/penusta.duckdb（events / events_clean）→ 成功したら curated を消して Parquet を書き直す
 scripts/analytics.sh funnel    # 試合別ファネル（analytics/queries/funnel_by_match.sql）
 scripts/analytics.sh shell     # DuckDB の対話モード
@@ -286,7 +286,7 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
 - checkout が released / expired のチケットのブロックまでロックすると、追加と削除を繰り返して多数のブロックを握れてしまう（レビューで検出）。held に絞っている
 - 購入側の 55P03 / 40P01（ロック待ちのタイムアウト、デッドロックの再試行切れ）は api/* で 503 `busy` にし、SQL を返さない。
   管理者側の 55P03 は 409 `allocation_busy`
-- `apply` は最上位のトランザクションでしか呼べない（`SET LOCAL` と 55P03 の abort が外側に及ぶ）。HTTP テストも `DatabaseTruncation` で書く
+- `apply` は最上位のトランザクションでしか呼べない（入れ子だと `SET LOCAL` が savepoint を越えて外側の終わりまで残り、デッドロックは Laravel が再試行せず外側ごと失敗させる）。HTTP テストも `DatabaseTruncation` で書く
 
 ### テスト
 
