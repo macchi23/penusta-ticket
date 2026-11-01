@@ -660,3 +660,27 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「鍵の使用を監査」「鍵を無効化」「ローテーション」「職務の分離」→ SSE-KMS のカスタマー管理キー
 - 「KMS のスロットリング」「KMS の費用」「大量のオブジェクト」→ S3 バケットキー
 - 「個人情報」「機密データの検出」「S3」→ Macie
+
+### 15-8. 運用と監視（CloudTrail / Glue Data Quality / EventBridge / CloudWatch）
+
+**ペヌスタでの使い方**
+- データ品質の検査は、Athena の SQL で書く案を演習に置いている（dea-exercises 3-1）。Glue Data Quality はその対比。CloudTrail のイベント履歴で自分の操作を探す演習も 3-4 にある
+
+**判断ルール**
+- 誰が・いつ・どこからリソースを消した / 設定を変えた → CloudTrail の管理イベント（既定で記録。イベント履歴で直近 90 日を無料で見られる）
+- 誰が S3 のオブジェクトを読んだ / 書いた、Lambda の実行 → CloudTrail のデータイベント（既定では記録されない。証跡を作って有効にする）
+- データの値の品質（欠損、行数、一意性、値の範囲）を管理された規則で検査、合わなければ止める → Glue Data Quality（DQDL の規則。カタログのテーブルに対して評価するか、ETL ジョブの中で EvaluateDataQuality。失敗時はジョブを止めるか、合わない行を分ける。規則の推薦あり）
+- サービスの状態の変化（Glue のジョブの失敗など）をきっかけに通知・後続を起動 → EventBridge のルール（Job State Change の FAILED → SNS / SQS / Lambda / Step Functions）
+- メトリクスがしきい値を超えたら通知 → CloudWatch のアラーム
+
+**ひっかけ**
+- 「CloudTrail はすべての API を既定で記録」→ 既定は管理イベントだけ。S3 のオブジェクトの読み書きはデータイベントで、証跡で有効にしないと残らない
+- 「CloudWatch のメトリクスで誰が消したか分かる」→ 回数は分かっても、誰かは分からない
+- 「品質の検査を PySpark の assert / Athena + Lambda で」→ 動くが自前の仕組み。「管理された仕組みで」なら Glue Data Quality
+- 「Macie でデータ品質」→ Macie は機密データの検出
+- 「Lambda で 1 分ごとにジョブの状態を見る」→ 遅れと無駄な実行。状態の変化はイベントで受ける
+
+**問題文のキーワード**
+- 「誰が」「いつ」「API の呼び出し」「監査」→ CloudTrail（オブジェクトの読み書きならデータイベント）
+- 「データ品質」「規則」「欠損」「完全性」「DQDL」→ Glue Data Quality
+- 「失敗したらすぐ通知」「状態の変化」→ EventBridge のルール + SNS
