@@ -519,3 +519,36 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **採らなかった選択肢**
 - Lambda: 実行時間は最大 15 分、メモリは最大 10GB。大きなファイルや重い処理は Glue か EMR。S3 のイベント通知は重複しうるので、書き込みは冪等にする（DynamoDB の PutItem は同じキーなら上書き）
 - EMR Serverless: 既存の Spark / Hive をクラスター管理なしで動かしたいときの候補。構成の細かい制御とスポットが要件なら EMR on EC2
+
+### 15-3. 分析のクエリ（Athena / Redshift / Redshift Spectrum / RDS）
+
+**ペヌスタでの使い方**
+- 分析は DuckDB（ローカル）と Athena（実 AWS、14.）。Redshift は常時課金のプロビジョンドを避けて使っていない（12.）
+
+**判断ルール**
+- 大きな表の結合・集計（TB 級）、多数の同時ユーザー、BI ダッシュボード → Redshift（列指向、MPP）。同時アクセスの急増は Concurrency Scaling
+- 同じ形のクエリが繰り返し流れる → Redshift のマテリアライズドビュー（増分の更新、自動の更新、クエリの自動の書き換え）と結果のキャッシュ
+- Redshift の表と S3 のデータを 1 本の SQL でまたぐ、S3 のデータは読み込まない → Redshift Spectrum（Glue Data Catalog を外部スキーマとして参照）
+- S3 のデータを、たまに・その場で調べる、サーバーなし、クエリした分だけ課金 → Athena
+- 行単位の読み書きが中心のアプリ（OLTP） → RDS / Aurora。分析の主役にはしない
+- RDS / Aurora か Redshift かは、量でなく処理の形で決める。容量は Aurora 最大 128TiB、RDS for PostgreSQL 最大 64TiB で 10TB は入る。大量の行の集計・結合（OLAP）なら Redshift、行単位の読み書き（OLTP）なら Aurora
+- Aurora の業務データを分析に使う、ETL の運用を避けたい → Aurora から Redshift への zero-ETL 統合
+
+**ひっかけ**
+- 「マテリアライズドビューがあるので RDS for PostgreSQL でも同じ」→ 1 台で動く行指向で、10TB の結合は 1 本が重い。PostgreSQL のマテリアライズドビューは REFRESH で全部作り直す
+- 「10TB なら RDS / Aurora に入るので RDS / Aurora」→ 入るかどうかでなく処理の形。集計・結合が中心なら行指向の 1 台より列指向の MPP。読み取りレプリカは同時に流せる本数を増やすだけで、1 本ごとは速くならない
+- 「データマートは RDS」→ データマートは用途ごとの分析用データという意味で、置き場所ではない。TB 級の BI 用なら Redshift / Redshift Serverless
+- 「数百人が見るダッシュボードを Athena で」→ クエリごとのスキャン課金と同時実行数のクォータがあり、繰り返しの多い用途に向かない
+- 「古いデータも COPY で Redshift に入れる」→ 「読み込みたくない」に反し、保存の費用も増える。Spectrum で外から読む
+- 「毎晩まとめ直す / UNLOAD して Athena だけで」→ データの二重化と、毎晩の遅れが生じる
+- 「たまの調査に Redshift のプロビジョンド / EMR の Trino」→ 何もしない時間も課金される
+
+**問題文のキーワード**
+- 「TB 級」「複雑な結合」「多数の同時ユーザー」「BI」→ Redshift
+- 「繰り返しのクエリ」「応答を安定」→ マテリアライズドビュー、結果のキャッシュ
+- 「Redshift と S3 をまたぐ」「読み込まずに」→ Redshift Spectrum
+- 「アドホック」「たまに」「サーバーレス」「クエリした分だけ」→ Athena
+
+**採らなかった選択肢**
+- Redshift Serverless: 使った分だけの課金で、管理も不要。ただ、データの読み込みか Spectrum の設定が要る。S3 をたまに調べるだけなら Athena が最短
+- Athena の federated query: RDS や DynamoDB など S3 以外もまたいで SQL を流したいときの選択肢
