@@ -759,3 +759,27 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「30 日後」「1 年後」「7 年で削除」→ ライフサイクル（移行 + 有効期限）
 - 「再作成できる」「1 つの AZ」→ One Zone-IA
 - 「ミリ秒で取り出し」「アーカイブ」→ Glacier Instant Retrieval
+
+### 15-12. Glue のカタログ・クローラ・ジョブのブックマーク
+
+**ペヌスタでの使い方**
+- 実 AWS では列が固定なので、クローラを使わず partition projection にした（14.）。列が予告なく増えるならクローラが答えになる
+
+**判断ルール**
+- 新しいパーティションに加えて、列も予告なく増える → Glue のクローラをスケジュールで動かす（スキーマが変わったときの扱いは設定で選ぶ: テーブルを更新 / ログに残すだけ）
+- 列が固定で、パーティションの形も決まっている → partition projection（クローラ不要）
+- パーティションだけを足す → `ALTER TABLE ADD PARTITION` / `MSCK REPAIR TABLE`（スキーマの変化は拾わない。MSCK はパーティションが多いと遅い）
+- 前回の後に増えたデータだけを処理、自前の記録は作らない → Glue のジョブのブックマーク（S3 はファイルの更新時刻、JDBC はキーの列で覚える。`job.init` / `job.commit` と `transformation_ctx` が前提。やり直しはブックマークのリセット）
+- Athena、EMR、Redshift Spectrum でテーブルの定義を共有 → Glue Data Catalog を共通のメタストアにする（EMR はメタストアに Glue Data Catalog を使う設定）
+
+**ひっかけ**
+- 「partition projection で列の追加も追従」→ projection が扱うのはパーティションの値だけ。列は固定が前提
+- 「MSCK REPAIR TABLE でスキーマも更新」→ パーティションを足すだけ
+- 「処理済みのファイルを移す / DynamoDB に記録する」→ 動くが自前の仕組み。「自前で作らない」ならブックマーク
+- 「LF-Tags でテーブルの定義を共有」→ LF-Tags は権限のためのタグ
+
+**問題文のキーワード**
+- 「スキーマが変わる」「新しい列」「自動で検出」→ Glue のクローラ
+- 「スキーマが固定」「パーティションの形が決まっている」→ partition projection
+- 「増分だけ処理」「前回の続き」→ ジョブのブックマーク
+- 「共通のメタストア」「Hive メタストアの代わり」→ Glue Data Catalog
