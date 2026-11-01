@@ -26,6 +26,10 @@ effort: medium
   - 後始末は probe の rollback → purge → truncate の順。`DatabaseTruncation` は開始時にしか truncate しないので、終了時に自分で消す
     （残すと後続の `RefreshDatabase` 系テストの件数が壊れる）。phpunit は `--order-by=random` でも 1 回流す
   - 最上位トランザクションでしか呼べないサービス（例: `AllocationChangeService::apply`）は、HTTP 経由のテストも `DatabaseTruncation` で書く
+- E2E（`e2e/`）は開発 DB の「今」のデータに対して走る。次の定石に従う:
+  - 試合・ブロックは ID を決め打ちせず、その時の販売フェーズ（一般販売か会員限定か、`ends_at` までの余裕）と利用者の資格を前提に API で選ぶ
+  - 日付の経過で対象が無い期間がありうる（中断期間、シーズン終了後）。無いときは、理由と次に回せる時期をエラー文に出して止める
+    （例: `e2e/lib/api.ts` の `noOnSaleMatchMessage`）
 - 返す前に `scripts/check.sh` を対象（`backend` / `frontend` / `all`）で実行し、通す。1〜2 分かかるので Bash の timeout は 600000 にしてフォアグラウンドで実行する
 - ブリーフに無い判断が必要になったら、最も保守的な選択で進め、返却の「逸脱・判断」に書く。
   ブリーフの前提が誤っていて進められない場合は、実装せずにその旨を返す
