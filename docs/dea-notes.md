@@ -578,3 +578,28 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「NFS / SMB」「ファイルサーバー」「スケジュール」「整合性の検証」→ DataSync
 - 「取引先」「SFTP」→ Transfer Family
 - 「帯域が限られる」「数十 TB〜PB」「オフライン」→ Snowball Edge
+
+### 15-5. オーケストレーション（Step Functions / MWAA / EventBridge / Glue Workflows）
+
+**ペヌスタでの使い方**
+- 定期実行は Laravel のスケジューラ（13.）。実 AWS の export → sync → 照合のつなぎは Step Functions + EventBridge Scheduler の案を演習に置いている（dea-exercises 1-5）
+
+**判断ルール**
+- 複数の AWS サービスをつなぐ、分岐・再試行・失敗時の通知、サーバーレス、図で見える → Step Functions（状態ごとの Retry / Catch。Workflow Studio）
+- 既存の Airflow の DAG をそのまま、Airflow の基盤は管理しない → Amazon MWAA
+- 決まった時刻に 1 つ起動するだけ → EventBridge Scheduler（タイムゾーン指定、1 回きりのスケジュールも可）
+- イベント（S3 にファイルが置かれた等）をきっかけに起動 → EventBridge のルール（S3 のイベント通知を EventBridge に送る）
+- Glue のジョブとクローラだけをつなぐ → Glue Workflows（トリガー）
+
+**ひっかけ**
+- 「ファイルが来たときだけ流すパイプラインを MWAA で」→ 環境は使っていない時間も 1 時間ごとに課金。Python で DAG を書く。Step Functions は状態遷移の回数だけ課金
+- 「Glue Workflows で Athena や SNS もつなぐ」→ Glue のジョブ・クローラ・トリガーしか扱えない
+- 「1 日 1 回の起動に Step Functions の Wait で待つループ」→ 余計な仕組み。スケジュールは EventBridge Scheduler
+- 「EventBridge のルールの cron で日本時間を指定」→ ルールの cron は UTC。タイムゾーンを指定するなら Scheduler
+- 「EC2 の cron」→ サーバーの管理が要る
+
+**問題文のキーワード**
+- 「複数のサービス」「分岐」「再試行」「エラー処理」「ビジュアル」「サーバーレス」→ Step Functions
+- 「既存の Airflow」「DAG」「書き直さない」→ MWAA
+- 「毎日決まった時刻」「タイムゾーン」「1 回だけ」→ EventBridge Scheduler
+- 「Glue のジョブとクローラの依存関係」→ Glue Workflows
