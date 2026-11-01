@@ -733,3 +733,29 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「トラフィックが予測できない」「変動」→ オンデマンド
 - 「別の属性で検索」「既存の表」→ GSI
 - 「自動で期限切れ」「追加の費用なし」→ TTL
+
+### 15-11. S3 のストレージクラスとライフサイクル
+
+**ペヌスタでの使い方**
+- raw にライフサイクルを設計だけする演習を置いている（dea-exercises 2-7）。最低保存期間の課金があるので実際には適用しない
+
+**判断ルール**
+- 読まれ方が予測できる（最初はよく読み、その後は読まない） → ライフサイクルで Standard → Standard-IA → Glacier 系へ移す。期限で消すなら有効期限も設定
+- 読まれ方が予測できない、変わる、取り出しの料金をかけたくない → Intelligent-Tiering（オブジェクトごとに少額の監視料金。128KB 未満は自動で移らない）
+- 作り直せるデータ、めったに読まない、読むときはミリ秒、AZ の喪失は許容 → One Zone-IA
+- めったに読まないが、読むときはミリ秒 → Glacier Instant Retrieval
+- 取り出しは数分〜12 時間でよい → Glacier Flexible Retrieval
+- 取り出しは 12 時間以内でよい、最安で長期保存 → Glacier Deep Archive
+- 最低保存期間: Standard-IA / One Zone-IA は 30 日、Glacier Instant / Flexible は 90 日、Deep Archive は 180 日。前に消しても残り日数分は課金される
+
+**ひっかけ**
+- 「Intelligent-Tiering に置けば削除も自動」→ 期限での削除はライフサイクルの有効期限で設定する
+- 「最初から Deep Archive」→ 最初によく読むデータは取り出しが 12 時間かかり、取り出しの料金もかかる
+- 「IA 系は取り出し無料」→ 取り出しに料金がかかる。小さなオブジェクトは 128KB として課金
+- 「作り直せないデータを One Zone-IA に」→ AZ が失われると消える
+
+**問題文のキーワード**
+- 「アクセスパターンが不明 / 変化する」→ Intelligent-Tiering
+- 「30 日後」「1 年後」「7 年で削除」→ ライフサイクル（移行 + 有効期限）
+- 「再作成できる」「1 つの AZ」→ One Zone-IA
+- 「ミリ秒で取り出し」「アーカイブ」→ Glacier Instant Retrieval
