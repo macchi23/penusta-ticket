@@ -1,6 +1,6 @@
 # 開発メモ（引き継ぎ）
 
-最終更新: 2026-10-11（スタジアム 2 万人化、7 シーズン分の成績シナリオ付き合成データ）
+最終更新: 2026-11-07（1-5 の照合で数字を更新し、穴の一覧を追加）
 
 ## 現状
 
@@ -15,7 +15,7 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
 - 投入済みデータ（2026-10-11、`--seasons=7`）: 7 シーズン 123 試合（2026-27 は finished 5 / 販売途中 3 / 未販売 11）/
-  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 9 万 + 管理者 1 / 注文 91.9 万 / チケット 155.5 万（2026-10-25 に数え直し）/ イベント 603 万（2026-10-11 時点）。
+  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 90,002（合成 9 万 + 管理者 + test@example.com）/ 注文 91.9 万 / チケット 155.5 万 / イベント 505.6 万（2026-11-06 実測）。
   合成データの仕様・規模・特徴量の約束は [demo-data.md](demo-data.md)
 - 管理画面 http://localhost:3100/admin （ユーザー切替で先頭の「管理者」を選ぶ）で試合ごとの割当を塗り替えられる（下の「割当エディタ」）
 - events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
@@ -200,7 +200,7 @@ docker compose exec scheduler php artisan schedule:test --name=events:export   #
   （`penusta_demo_user` / `penusta_sid`）をヘッダに載せて Laravel を内部 URL で呼ぶ。ブラウザは認証付き API を直接呼ばない。
   `src/proxy.ts`（旧 middleware）がセッション cookie を発行する
 - 行動ログ: `add_to_cart` / `remove_from_cart` / `purchase` / `payment_failed` は backend がトランザクション確定後に記録、
-  `view_match` / `view_seatmap` は frontend の `ViewTracker` が `POST /api/events` に送る。
+  `view_match` / `view_seatmap` / `view_resale` は frontend の `ViewTracker` が `POST /api/events` に送る。
   指定席の `add_to_cart` は 1 クリック 1 件（`quantity: 1`）、自由席は一括反映 1 回につき 1 件（`quantity` = 枚数）。
   合成データ（1 注文 1 件）とは `COUNT(*)` の粒度が違うことがある（`SUM(quantity)` は一致）
 - 自由席は `PUT /api/matches/{match}/cart/blocks/{block}/items` に券種ごとの枚数を送って一括反映する（増減を 1 トランザクションで）。
@@ -329,6 +329,40 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
   秒単位にすると乱数の呼び出しが変わり orders 以降の合成データがすべて変わる
 - pint は `use` 漏れを検出しない（`catch (Throwable)` が名前空間内のクラスを指して何も捕まえないバグをレビューで検出）。
   静的解析（larastan）を `scripts/check.sh` に足す候補
+
+## 1-5 の照合で分かった穴（2026-11-07）
+
+記事 1-5 の素材集めでコードと実データを突き合わせて分かった、**今は直さないと決めた点**の一覧。直したら取り消し線にして解決日を書く。
+
+### イベントの記録
+
+- **コミット後の記録が失敗すると購入イベントが恒久的に欠ける**: `CheckoutController` は `CheckoutService` のコミット後に `purchase` を書く。ここに try/catch が無いので、失敗すると 500 になり注文は paid のまま残る。やり直すと 200 で注文ページへ進むので成功に見えるが、`purchased=false` なので記録されない（コード読解のみ。実行とテストは無い）。リセールの購入も同じ形。直すなら try/catch + ログ、または outbox。購入経路なので code-reviewer と security-reviewer を並列で
+- **`X-Device` をフロントが送っていない**: `ActivityRecorder` は受けるが `frontend/src/lib/server-api.ts` が送らないので、実データの `device` は全部 NULL（2026-11-06 に 236 件）。Server Action 経由なので User-Agent からの判定が要る。今は `device IS NULL` が実データの見分けに使えているので、直すと別の見分け方が要る
+- **append-only は規約だけ**: DB の制約もトリガーも無い。`user_id` は `nullOnDelete` で更新されうる
+- **events に出ない事象**: 仮押さえの失効、リセール出品の期限切れ、年パス発行、割当変更。業務テーブルや監査表には残る。入場は機能ごと未実装
+- **合成データが作らない種別**: `payment_failed` / `remove_from_cart` / `resale_remove_from_cart`。実データでも 0 件 / 12 件 / 4 件だけ
+
+### 実データと合成データの形の差
+
+- `add_to_cart` の payload: 実データは `block_code, match_id, order_id, quantity, seat_id`、合成は `block_code, match_id, quantity`。離脱セッションの分は `block_code` も無い（331,163 件）
+- `view_seatmap`: 実データは `block_code` が必須、合成は 819,611 件が無し
+- 粒度: 指定席の `add_to_cart` は実データが 1 クリック 1 件、合成が 1 注文 1 件（`SUM(quantity)` は一致）
+- ステップ間隔: 合成は分単位。実データは秒単位で、E2E と手動確認の分しかない（直すと乱数の呼び出しが変わり以降が全部変わる。上の節にも記載）
+- 形の一致を照合するテストはリセール系だけ（`GenerateDemoDataTest`）。一次販売には無い
+
+### 合成データの仕込み
+
+- **平日の夜 .75 が一度も効いていない**: ホーム戦の平日開催 9 試合はすべて祝日で、`day()` は祝日を先に判定する。`FixtureScheduler` の候補は GW → 祝日 → 水曜の順で、不足はシーズンごとに 1〜3 節なので祝日で埋まる（リーグ全体の平日の節 12 日もすべて祝日。シードを変えても回らない可能性が高いが、他のシードは数えていない）。リセールの `BOOST_WEEKDAY` も同じ理由で効かない。直すと日程以降の全データが変わるので、第 2 部の数字を取り直す覚悟で
+- **係数が 1 度も適用されないことを検知するテストが無い**: 平日の件はテストが全部通ったまま残っていた
+- **「ビッグマッチは先行完売」は未実装**: 先行で売れた枚数は全体の約 2.5% で、人気度でもほとんど差が無い。`docs/concept.md` の方針 4 にある例のうち実現していないもの
+- **人気度 5 が 4 を超えにくい**: ビッグマッチの +500 円が PRICE で効き、相手の効果と打ち消し合っている（推測。分解していない。第 3 部の題材）
+- `backend/database/seeders/PriceSeeder.php:56` の券種名「年パス引換」は、引換を発行に置き換えた後も残っている
+
+### 分析の準備
+
+- **エクスポートは events だけ**: 相手・天気・順位・価格は `matches` と `match_prices` にしか無く、`events:export` も `analytics/` も持っていない。需要の答えを第 2 部で確かめるなら次元データの出し方を 2-1 までに決める
+- **calibration の数字が再現しきれていない**: `demo-data.md` の表は 2021 が .53、2025 が .85 だが、1-5 の素材集めで別の定義で測ると .498 / .829。定義の差か、その後の変更かは未確定。`analytics/queries/calibration_pg.sql` を流して確かめる（TEMP VIEW を作るので読み取り専用の接続では動かない）
+- 規模の数字が `demo-data.md` / `dev-notes.md` / `dea-exercises.md` / 公開記事に散っていて毎回ずれる
 
 ## 実 AWS（S3 + Glue/Athena）（2026-10-05）
 
