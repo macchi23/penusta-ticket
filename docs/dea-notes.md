@@ -783,3 +783,128 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「スキーマが固定」「パーティションの形が決まっている」→ partition projection
 - 「増分だけ処理」「前回の続き」→ ジョブのブックマーク
 - 「共通のメタストア」「Hive メタストアの代わり」→ Glue Data Catalog
+
+### 15-13. Redshift の権限・主キー・DR・PIVOT
+
+15-13〜15-17 は、2026-11-09 の模擬問題と確認問題で間違えた論点をまとめたもの。
+
+**判断ルール**
+- スキーマ内のテーブルを読ませる → スキーマの `USAGE` とテーブルの `SELECT` の両方を付ける
+- 既存のテーブルにまとめて付ける → `GRANT SELECT ON ALL TABLES IN SCHEMA <スキーマ> TO ...`
+- 今後作られるテーブルにも自動で付ける → `ALTER DEFAULT PRIVILEGES FOR USER <作成者> IN SCHEMA <スキーマ> GRANT SELECT ON TABLES TO ...`。`FOR USER` を省くと、実行したユーザーが作るテーブルだけが対象
+- 主キー・一意制約は強制されない。情報として持ち、クエリの最適化に使われる（`NOT NULL` は強制される）
+- 再送で行を重複させない → ステージングテーブルに `COPY` し、`MERGE` で本テーブルへ反映する
+- リージョン障害への備え → クロスリージョンのスナップショットコピーを有効にし、障害時にコピー先で復元する。KMS で暗号化したクラスターは、コピー先のリージョンでスナップショットコピー許可を作る
+- 行を列に変換 → `PIVOT`。列を行に変換 → `UNPIVOT`
+
+**ひっかけ**
+- 「ETL の最後に毎回 `GRANT SELECT ON ALL TABLES` を実行」→ 動くが運用負荷が残る。「今後のテーブル」「運用負荷を最小」なら `ALTER DEFAULT PRIVILEGES`（2026-11-09 の演習で、この理由で外した）
+- 「`SELECT` だけ付ければ読める」→ スキーマの `USAGE` も要る。逆も同じ
+- 「主キーを定義し直して重複を防ぐ」→ 定義しても重複 INSERT は通る
+- 「重複があるまま主キーを定義しておく」→ 最適化の前提が崩れ、誤った結果になることがある
+- 「Multi-AZ でリージョン障害に備える」→ Multi-AZ は同一リージョン内の対策
+- 「自動スナップショットの保持期間を延ばす」→ 別リージョンには置かれない
+- 「DR のために別リージョンでクラスターを常時稼働」→ 数時間の損失を許容でき、コスト最小ならスナップショットコピーで足りる
+- 「`PIVOT` の `IN` にサブクエリを書く」→ 書けるのは定数だけ
+
+**問題文のキーワード**
+- 「今後作成されるテーブル」→ `ALTER DEFAULT PRIVILEGES`
+- 「再送」「重複を防ぐ」「UPSERT」→ ステージングテーブル + `MERGE`
+- 「リージョン障害」「別リージョンで復旧」「コスト最小」→ クロスリージョンのスナップショットコピー
+- 「行を列に」「クロス集計」→ `PIVOT`
+
+### 15-14. Glue / Spark のジョブ調整と開発環境
+
+**判断ルール**
+- 小さなファイルが大量、タスク過多、ドライバーのメモリ不足 → DynamicFrame の読み込みで `groupFiles: inPartition` と `groupSize` を指定する。パーティション内のファイルをまとめて 1 タスクで読むので、タスクが減ってドライバーの負荷が下がる
+- 入力が 5 万ファイルを超えると、ファイルのグループ化は自動で有効になる（要確認）
+- 小さなファイル自体を減らす → compaction（5. 参照）
+- ノートブックから対話的に開発、クラスターは管理しない → Glue Interactive Sessions。アイドルタイムアウトを設定し、使った分だけ課金
+- AWS の実行料金をかけずに検証、PyTest で単体テスト → ローカルで Glue の Docker イメージを使う
+- 小さな表との結合でシャッフルが多い → 小さい側を Broadcast する。SQL は `/*+ BROADCAST(d) */`、DataFrame は `broadcast(df)`
+- 自動の Broadcast は `spark.sql.autoBroadcastJoinThreshold`（既定 10MB。要確認）以下の表だけ。超える表はヒントが要る
+- すべてのテーブルを API で取得 → `glue.get_paginator("get_tables").paginate(DatabaseName=...)`。データベースが複数なら `get_databases` も同様に回す
+
+**ひっかけ**
+- 「ワーカーの種類と数を増やして小さなファイルに対応」→ コストが増え、根本解決にならない
+- 「ジョブのブックマークで小さなファイルに対応」→ 処理対象を増分に絞るだけ。1 回に読むファイルが多ければ同じ
+- 「Python Shell に変更」→ Spark の分散処理の代わりにならない
+- 「開発エンドポイントを常時起動」→ 旧方式で、起動中ずっと課金される
+- 「大きなファクト表を Broadcast」→ 全エグゼキューターに配るので逆効果。Broadcast するのは小さい側
+- 「`spark.sql.shuffle.partitions` を増やす」→ シャッフルの分割数が変わるだけで、シャッフル自体は無くならない
+- 「`repartition(1)` してから結合」→ 1 タスクに処理が集中する
+- 「`get_tables` を 1 回呼ぶ」→ 結果がページ分割され、残りを取り逃す
+
+**問題文のキーワード**
+- 「数十万の小さなファイル」「ドライバーの OOM」→ `groupFiles` / `groupSize`
+- 「対話的に」「ノートブック」→ Interactive Sessions
+- 「ローカル」「PyTest」「コストをかけずに」→ Glue の Docker イメージ
+- 「小さなディメンション」「シャッフルを減らす」→ Broadcast
+- 「すべて取得」「Boto3」→ ページネーター
+
+### 15-15. Kinesis のコンシューマーの遅れとパーティションキー
+
+キーと順序の基本は 15-1 を参照。
+
+**判断ルール**
+- コンシューマーの遅れを監視 → ストリームは `GetRecords.IteratorAgeMilliseconds`、Lambda は `IteratorAge`
+- Lambda の処理が追いつかない、エラーとスロットリングは無い → イベントソースマッピングの `ParallelizationFactor` を増やす（シャードあたり最大 10。要確認）。パーティションキー単位の順序は保たれる
+- 特定のシャードに偏る → カーディナリティの高いキーにする
+- エンティティごとの順序を保つ → エンティティ ID をパーティションキーにする
+
+**ひっかけ**
+- 「パーティションキーをランダムにして遅れを解消」→ エンティティごとの順序が崩れる。原因がコンシューマーの処理速度なら遅れも解消しない
+- 「データ保持期間を延ばす」→ 消えるまでの猶予が増えるだけで、遅れは減らない
+- 「最大レコード有効期間を短くする」→ 古いレコードを読み飛ばすので、データ欠損になる
+- 「日付や status をパーティションキーにする」→ 値の種類が少なく偏る
+- 「CPU 使用率で遅れを監視」→ 遅れは `IteratorAge` 系の指標で見る
+
+**問題文のキーワード**
+- 「処理の遅れ」「追いつかない」→ `IteratorAge` 系の指標
+- 「順序を維持したまま並列度を上げる」→ `ParallelizationFactor`
+- 「ホットシャード」→ カーディナリティの高いキー
+
+### 15-16. Step Functions の Standard / Express と統合パターン
+
+13. と 15-5 も参照。
+
+**判断ルール**
+- 長時間の実行（最長 1 年。要確認）、厳密に 1 回の実行、実行履歴の確認 → Standard。課金は状態遷移の回数
+- 5 分以内、大量、高頻度 → Express。課金は実行回数・時間・メモリ。非同期は at-least-once、同期は at-most-once
+- ジョブの完了を待って次へ進む → `.sync`。Glue は `arn:aws:states:::glue:startJobRun.sync`
+- 外部の処理からの完了通知を待つ → `.waitForTaskToken` + `SendTaskSuccess`
+
+**ひっかけ**
+- 「`.sync` なしの `startJobRun` で完了を待つ」→ ジョブを開始しただけで次のステートへ進む
+- 「固定秒数の Wait を挟む」→ 実行時間が変わると破綻する
+- 「`GetJobRun` をポーリングする Lambda とループを作る」→ 動くが運用負荷が増える
+- 「Express で 30 分のジョブの完了を待つ」→ 最長 5 分で、`.sync` と `.waitForTaskToken` も使えない
+
+**問題文のキーワード**
+- 「完了を待って」「完了後に」→ `.sync`
+- 「コールバック」「人の承認」「外部システムからの通知」→ `.waitForTaskToken`
+- 「長時間」「監査」「厳密に 1 回」→ Standard
+- 「毎秒大量」「短時間」「IoT」→ Express
+
+### 15-17. 細かい機能（S3 → EventBridge / MemoryDB / MWAA の requirements.txt / ウィンドウ関数）
+
+**判断ルール**
+- S3 のイベントを複数の宛先へ、細かい条件で振り分ける → バケットのプロパティで EventBridge への通知を ON にし、ルールを作る
+- 耐久性のある Redis 互換のインメモリ DB、これを主データベースにする → MemoryDB
+- MWAA に Python パッケージを追加 → `requirements.txt` を S3 に置き、環境が参照するオブジェクトバージョンを更新する（`aws mwaa update-environment --requirements-s3-object-version`）。S3 バケットのバージョニングが前提
+- 前の行 → `LAG`、次の行 → `LEAD`、パーティションの先頭 → `FIRST_VALUE`
+- パーティションの最後 → `LAST_VALUE` + `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`
+
+**ひっかけ**
+- 「EventBridge への通知を ON にするだけで宛先に届く」→ ルールとターゲットが要る
+- 「ElastiCache を耐久性のある主データベースに」→ 主な用途はキャッシュ
+- 「DAX で Redis 互換の DB を用意」→ DAX は DynamoDB 専用のキャッシュ
+- 「`requirements.txt` を更新すれば反映される」→ 環境が参照するバージョンの更新が要る。`dags/` へのコピー、ワーカーへの SSH、DAG の再アップロードは誤り
+- 「`ORDER BY` だけの `LAST_VALUE` で最後の値を取る」→ 既定のフレームが現在行までなので、基本的に現在行の値を返す
+- 「`MIN(amount)` で初回の金額を取る」→ 最小値であって、最初の値ではない
+
+**問題文のキーワード**
+- 「S3 のイベント」「複数のターゲット」「イベントパターン」→ EventBridge
+- 「Redis 互換」「耐久性」「主データベース」→ MemoryDB
+- 「MWAA」「Python パッケージ」→ `requirements.txt` + オブジェクトバージョン
+- 「前日比」→ `LAG`、「初回との差」→ `FIRST_VALUE`
