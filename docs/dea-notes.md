@@ -472,8 +472,11 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - S3 / Redshift / OpenSearch に届ける、運用を最小に → Amazon Data Firehose。1 配信ストリームに宛先 1 つ
 - JSON を Parquet / ORC にして S3 へ → Firehose のレコード形式の変換（Glue Data Catalog のテーブル定義を使う）
 - ウィンドウ集計（タンブリング / スライディング / セッション）、リアルタイム分析、ストリームに SQL → Managed Service for Apache Flink（旧 Kinesis Data Analytics）。イベント時刻とウォーターマークを扱える
+- トラフィックが大きく変動して予測できない、容量の計画をしたくない → Kinesis Data Streams のオンデマンド
+- 変動が小さく予測できる、コストを下げたい → Kinesis Data Streams のプロビジョンド（シャード数を指定し、増減は自分で行う）。切り替えは無停止で、ストリームごとに 24 時間で 2 回まで
 
 **ひっかけ**
+- 「予測できないのでプロビジョンド / 安定しているのでオンデマンド」→ 逆。Provision は前もって用意する、On-demand は求めに応じて（模擬問題のセット 2 で、DynamoDB と Kinesis の両方で取り違えた）
 - 「Firehose で複数のアプリに配る」→ Firehose は宛先に届けるだけで、アプリが位置を持って読む・読み直すことはできない
 - 「SQS の標準キュー + SNS のファンアウトで順序と読み直し」→ 標準キューは順序を保証しない。処理したら削除するので巻き戻せない（FIFO でも読み直しは不可）
 - 「S3 のイベント通知でストリーム処理」→ 単位はオブジェクトでイベントではない。1 秒未満の遅延は無理
@@ -485,6 +488,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「複数のコンシューマー」「再処理 / リプレイ」「順序」「1 秒未満」→ Kinesis Data Streams（+ 拡張ファンアウト）
 - 「S3 に配信」「運用を最小」「Parquet に変換」「数分の遅れは許容」→ Firehose
 - 「ウィンドウ」「リアルタイムの集計 / 異常検知」「ストリームに SQL」→ Managed Service for Apache Flink
+- 「変動が小さいと分かった」「コスト効率」→ プロビジョンド
 
 **採らなかった選択肢**
 - Lambda のタンブリングウィンドウ（Kinesis をイベントソースにして最大 15 分）: 単純な集計なら答えになりうる。問題文が「ウィンドウ集計」「リアルタイム分析」なら定番は Flink
@@ -533,8 +537,10 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 行単位の読み書きが中心のアプリ（OLTP） → RDS / Aurora。分析の主役にはしない
 - RDS / Aurora か Redshift かは、量でなく処理の形で決める。容量は Aurora 最大 128TiB、RDS for PostgreSQL 最大 64TiB で 10TB は入る。大量の行の集計・結合（OLAP）なら Redshift、行単位の読み書き（OLTP）なら Aurora
 - Aurora の業務データを分析に使う、ETL の運用を避けたい → Aurora から Redshift への zero-ETL 統合
+- Athena の費用を予測したい、重要なクエリを他のクエリの影響から切り離す → キャパシティ予約（DPU を確保し、ワークグループを割り当てる）。SQL の変更は不要。割り当てたワークグループのクエリだけが予約を使い、DDL / DML のクォータにも数えない
 
 **ひっかけ**
+- 「Athena の DML の同時実行数のクォータを引き上げる」→ 同じアカウントの他のクエリと枠を共有したままなので、切り離せない。費用もスキャン量のままで予測しやすくならない
 - 「マテリアライズドビューがあるので RDS for PostgreSQL でも同じ」→ 1 台で動く行指向で、10TB の結合は 1 本が重い。PostgreSQL のマテリアライズドビューは REFRESH で全部作り直す
 - 「10TB なら RDS / Aurora に入るので RDS / Aurora」→ 入るかどうかでなく処理の形。集計・結合が中心なら行指向の 1 台より列指向の MPP。読み取りレプリカは同時に流せる本数を増やすだけで、1 本ごとは速くならない
 - 「データマートは RDS」→ データマートは用途ごとの分析用データという意味で、置き場所ではない。TB 級の BI 用なら Redshift / Redshift Serverless
@@ -548,6 +554,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「繰り返しのクエリ」「応答を安定」→ マテリアライズドビュー、結果のキャッシュ
 - 「Redshift と S3 をまたぐ」「読み込まずに」→ Redshift Spectrum
 - 「アドホック」「たまに」「サーバーレス」「クエリした分だけ」→ Athena
+- 「Athena」「費用を予測」「他のクエリの影響を受けない」→ キャパシティ予約 + ワークグループ
 
 **採らなかった選択肢**
 - Redshift Serverless: 使った分だけの課金で、管理も不要。ただ、データの読み込みか Spectrum の設定が要る。S3 をたまに調べるだけなら Athena が最短
@@ -604,7 +611,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「毎日決まった時刻」「タイムゾーン」「1 回だけ」→ EventBridge Scheduler
 - 「Glue のジョブとクローラの依存関係」→ Glue Workflows
 
-### 15-6. 権限（IAM / Lake Formation / バケットポリシー / KMS のキーポリシー）
+### 15-6. 権限（IAM / Lake Formation / バケットポリシー / KMS のキーポリシー / オブジェクト所有権 / VPC エンドポイントポリシー）
 
 **ペヌスタでの使い方**
 - 実 AWS は SSO の DeveloperAccess で触っていて、分析者用の最小権限は未作成（dea-exercises 4-1）。Lake Formation の列・行の制御は演習 4-2 に置いている
@@ -615,8 +622,13 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 同じアカウントの中 → IAM ポリシーかバケットポリシーのどちらかで許可していれば読める（明示的な拒否が無い限り）
 - アカウントをまたぐ → 呼ぶ側の IAM ポリシーと、バケット側のバケットポリシーの両方で許可が必須
 - アカウントをまたいで SSE-KMS のオブジェクトを読む → カスタマー管理キーのキーポリシーと、呼ぶ側の IAM の両方で `kms:Decrypt`
+- 他のアカウントも書き込むバケットを ACL に頼らず管理する → オブジェクト所有権を「バケット所有者の強制」にし、バケットポリシーで許可する。ACL は無効になり、すべてのオブジェクトをバケット所有者が所有する（新しいバケットの既定）
+- VPC からのデータの持ち出しを制限する → S3 のゲートウェイエンドポイントのエンドポイントポリシーで、アクセスできるバケットを限定する
+- 特定のバケットを、特定のエンドポイント経由でしか使わせない → バケットポリシーの `aws:sourceVpce`
 
 **ひっかけ**
+- 「オブジェクトライターのままバケットポリシーで書き込みを許可」→ 書き込んだアカウントがオブジェクトを所有し、権限の管理に ACL が残る
+- 「バケットポリシーで持ち出しを防ぐ」→ 制御できるのは自分のバケットだけ。VPC の中から他のバケットへの書き込みは止まらない
 - 「IAM やバケットポリシーで列を隠す」→ S3 の権限の単位はオブジェクト。ファイルの中の列は隠せない
 - 「個人情報を除いたコピーを CTAS で作る」→ 二重化と同期の手間。仮名化した別のデータセットを作る場面なら正解になりうる
 - 「テーブルごとに権限を付ける」→ 増えるたびに作業が要る。属性で決めるなら LF-Tags
@@ -628,6 +640,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「列レベル」「行レベル」「セルレベル」「一元管理」→ Lake Formation（データフィルタ）
 - 「タグベース」「属性」「スケール」→ LF-Tags
 - 「クロスアカウント」→ IAM ポリシー + リソースポリシー（バケットポリシー、キーポリシー）の両方
+- 「ACL に頼らず」「バケット所有者」→ バケット所有者の強制
+- 「データの持ち出し」「VPC エンドポイント経由」→ エンドポイントポリシー
 
 **採らなかった選択肢**
 - Redshift の列単位の GRANT: データが Redshift の中にあるならこちら
@@ -769,12 +783,14 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 新しいパーティションに加えて、列も予告なく増える → Glue のクローラをスケジュールで動かす（スキーマが変わったときの扱いは設定で選ぶ: テーブルを更新 / ログに残すだけ）
 - 列が固定で、パーティションの形も決まっている → partition projection（クローラ不要）
 - パーティションだけを足す → `ALTER TABLE ADD PARTITION` / `MSCK REPAIR TABLE`（スキーマの変化は拾わない。MSCK はパーティションが多いと遅い）
+- Glue ジョブが書いたパーティションを、クローラを待たずにカタログへ登録する → ジョブの書き込みオプションで `enableUpdateCatalog` と `partitionKeys` を指定する。対象は S3 の json / csv / avro / parquet。`updateBehavior` の既定 `UPDATE_IN_DATABASE` はスキーマも上書きするので、上書きしないなら `LOG`
 - 前回の後に増えたデータだけを処理、自前の記録は作らない → Glue のジョブのブックマーク（S3 はファイルの更新時刻、JDBC はキーの列で覚える。`job.init` / `job.commit` と `transformation_ctx` が前提。やり直しはブックマークのリセット）
 - Athena、EMR、Redshift Spectrum でテーブルの定義を共有 → Glue Data Catalog を共通のメタストアにする（EMR はメタストアに Glue Data Catalog を使う設定）
 
 **ひっかけ**
 - 「partition projection で列の追加も追従」→ projection が扱うのはパーティションの値だけ。列は固定が前提
 - 「MSCK REPAIR TABLE でスキーマも更新」→ パーティションを足すだけ
+- 「クローラの遅れの対策に、ジョブの後で `MSCK REPAIR TABLE`」→ 登録はできるが、別の手順が残る。Glue ジョブが書くならジョブの中で登録する
 - 「処理済みのファイルを移す / DynamoDB に記録する」→ 動くが自前の仕組み。「自前で作らない」ならブックマーク
 - 「LF-Tags でテーブルの定義を共有」→ LF-Tags は権限のためのタグ
 
@@ -782,6 +798,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「スキーマが変わる」「新しい列」「自動で検出」→ Glue のクローラ
 - 「スキーマが固定」「パーティションの形が決まっている」→ partition projection
 - 「増分だけ処理」「前回の続き」→ ジョブのブックマーク
+- 「Glue ジョブ」「クローラの遅れ」「すぐにカタログへ」→ `enableUpdateCatalog` + `partitionKeys`
 - 「共通のメタストア」「Hive メタストアの代わり」→ Glue Data Catalog
 
 ### 15-13. Redshift の権限・主キー・DR・PIVOT
@@ -842,7 +859,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「小さなディメンション」「シャッフルを減らす」→ Broadcast
 - 「すべて取得」「Boto3」→ ページネーター
 
-### 15-15. Kinesis のコンシューマーの遅れとパーティションキー
+### 15-15. Kinesis のコンシューマーの遅れとパーティションキー / Lambda のイベントフィルタ
 
 キーと順序の基本は 15-1 を参照。
 
@@ -851,8 +868,10 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - Lambda の処理が追いつかない、エラーとスロットリングは無い → イベントソースマッピングの `ParallelizationFactor` を増やす（シャードあたり最大 10。要確認）。パーティションキー単位の順序は保たれる
 - 特定のシャードに偏る → カーディナリティの高いキーにする
 - エンティティごとの順序を保つ → エンティティ ID をパーティションキーにする
+- 関数を変えずに、対象外のレコードで Lambda を呼ばないようにする → イベントソースマッピングのフィルター条件（`FilterCriteria`）。Kinesis のレコードの中身は `data` キーで絞る。合わないレコードは関数に渡らず、イテレータは先へ進む
 
 **ひっかけ**
+- 「プロデューサーで振り分けて対象外を減らす」→ 別のシステムの変更が要る。Lambda 側のフィルター条件で足りる
 - 「パーティションキーをランダムにして遅れを解消」→ エンティティごとの順序が崩れる。原因がコンシューマーの処理速度なら遅れも解消しない
 - 「データ保持期間を延ばす」→ 消えるまでの猶予が増えるだけで、遅れは減らない
 - 「最大レコード有効期間を短くする」→ 古いレコードを読み飛ばすので、データ欠損になる
@@ -863,6 +882,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「処理の遅れ」「追いつかない」→ `IteratorAge` 系の指標
 - 「順序を維持したまま並列度を上げる」→ `ParallelizationFactor`
 - 「ホットシャード」→ カーディナリティの高いキー
+- 「大半のレコードは対象外」「関数を変更せずに」→ イベントソースマッピングのフィルター条件
 
 ### 15-16. Step Functions の Standard / Express と統合パターン
 
@@ -886,7 +906,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「長時間」「監査」「厳密に 1 回」→ Standard
 - 「毎秒大量」「短時間」「IoT」→ Express
 
-### 15-17. 細かい機能（S3 → EventBridge / MemoryDB / MWAA の requirements.txt / ウィンドウ関数）
+### 15-17. 細かい機能（S3 → EventBridge / MemoryDB / MWAA の requirements.txt / SQS のロングポーリング / ウィンドウ関数）
 
 **判断ルール**
 - S3 のイベントを複数の宛先へ、細かい条件で振り分ける → バケットのプロパティで EventBridge への通知を ON にし、ルールを作る
@@ -894,6 +914,13 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - MWAA に Python パッケージを追加 → `requirements.txt` を S3 に置き、環境が参照するオブジェクトバージョンを更新する（`aws mwaa update-environment --requirements-s3-object-version`）。S3 バケットのバージョニングが前提
 - 前の行 → `LAG`、次の行 → `LEAD`、パーティションの先頭 → `FIRST_VALUE`
 - パーティションの最後 → `LAST_VALUE` + `ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING`
+- SQS の空の受信を減らしてコストを下げる、遅れは許されない → ロングポーリング（キューの受信メッセージ待機時間を 1 秒以上に。最大 20 秒）
+- `OVER` の中で分けるのは `PARTITION BY` だけ。`ORDER BY` は順序を決め、集計の範囲（フレーム）を変える。`ORDER BY` なしなら全体の合計、ありなら累計になる（実機: DuckDB 1.5.6、2026-11-10）
+- 既定のフレームは `RANGE UNBOUNDED PRECEDING`。`ORDER BY` の値が同じ行は同時に範囲に入る。1 行ずつ足すなら `ROWS` を明示する（実機: 同上）
+- 同じ値の行の順序を確定する → `OVER` の `ORDER BY` に、一意になる列を足す（実機: 同上）
+- 順位の振り方。値が 7, 5, 5, 1 のとき、`row_number` は 1, 2, 3, 4、`rank` は 1, 2, 2, 4、`dense_rank` は 1, 2, 2, 3（実機: 同上）
+- グループごとに、ちょうど N 件 → `row_number`。同点を含めて上位 N 位まで → `rank`。上位 N 種類の値をすべて → `dense_rank`
+- Redshift のフレームの構文は `ROWS` のみで、`ORDER BY` 付きの集計ウィンドウ関数には明示が必須。`LAG` / `LEAD` に既定値の引数はなく、`COALESCE` か `NVL` で置き換える。Athena（Trino）は `lag(x, 1, 0)` と書ける
 
 **ひっかけ**
 - 「EventBridge への通知を ON にするだけで宛先に届く」→ ルールとターゲットが要る
@@ -902,9 +929,15 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「`requirements.txt` を更新すれば反映される」→ 環境が参照するバージョンの更新が要る。`dags/` へのコピー、ワーカーへの SSH、DAG の再アップロードは誤り
 - 「`ORDER BY` だけの `LAST_VALUE` で最後の値を取る」→ 既定のフレームが現在行までなので、基本的に現在行の値を返す
 - 「`MIN(amount)` で初回の金額を取る」→ 最小値であって、最初の値ではない
+- 「待機時間を長くすると、メッセージの受け取りが遅れる」→ ロングポーリングは、メッセージが届けばすぐ返る
+- 「`OVER` の `ORDER BY` は `GROUP BY` のように日付ごとに分ける」→ 分けるのは `PARTITION BY`。`OVER` は行数を変えない（実機: DuckDB 1.5.6、2026-11-10）
+- 「外側の `ORDER BY` で同じ値の行の計算順を決める」→ ウィンドウ関数の計算後に並べ替えるだけで、値は変わらない（実機: 同上）
+- 「`n - LAG(n)` の 1 行目は `n` のまま」→ `n - NULL` なので NULL（実機: 同上）
 
 **問題文のキーワード**
 - 「S3 のイベント」「複数のターゲット」「イベントパターン」→ EventBridge
 - 「Redis 互換」「耐久性」「主データベース」→ MemoryDB
 - 「MWAA」「Python パッケージ」→ `requirements.txt` + オブジェクトバージョン
 - 「前日比」→ `LAG`、「初回との差」→ `FIRST_VALUE`
+- 「空の受信」「常にポーリング」「コスト」→ SQS のロングポーリング
+- 「各グループの上位 N 件」→ `row_number` / `rank`（同点の扱いで選ぶ）
