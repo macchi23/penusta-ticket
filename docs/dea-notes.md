@@ -507,8 +507,10 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - サーバーレスの Spark で ETL、クラスターを管理したくない → Glue の ETL ジョブ
 - 小さなファイルを置かれるたびに数秒以内で処理 → S3 のイベント通知 + Lambda
 - S3 上のデータを SQL だけで変換して書き出す → Athena の CTAS / INSERT INTO
+- 毎晩など定期的に短時間だけ EMR on EC2 を使う、コストを下げる → 毎回クラスターを作り、処理をステップで登録し、最後のステップの完了後に自動で終了する（コンソールの「最後のステップの完了後にクラスターを終了」、CLI の `--auto-terminate`）。処理の時間分だけ課金される
 
 **ひっかけ**
+- 「1 日 2 時間のクラスターにリザーブドインスタンス」→ RI は常時使う前提の割引。使わない 22 時間分も払うことになる。短時間の定期処理は一時的なクラスター（模擬問題のセット 3 で外した）
 - 「サーバーレスの Glue が一番手軽なので Glue」→ 既存の Hive、クラスター構成の制御、スポットの条件があれば EMR。手軽さは 2 段目の決め手で、1 段目の条件で先に消える
 - 「ファイルごとに Glue のジョブを起動」→ 起動の待ちと 1 回 1 分の最低課金があり、小さなファイルには割に合わない
 - 「常時起動の EMR でファイルを監視」→ 何もしない時間も課金される
@@ -517,6 +519,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **問題文のキーワード**
 - 「コードを書かない」「アナリスト」「ビジュアル」「プロファイル」→ Glue DataBrew
 - 「既存の Hadoop / Spark / Hive」「クラスターを細かく設定」「スポット」→ EMR
+- 「毎晩」「数時間のバッチ」「EMR のコスト」→ ステップの完了後に終了する一時的なクラスター
 - 「サーバーレス」「Spark」「クラスターの管理不要」→ Glue の ETL ジョブ
 - 「ファイルが置かれるたび」「数秒以内」「小さい」→ S3 のイベント通知 + Lambda
 
@@ -538,9 +541,11 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - RDS / Aurora か Redshift かは、量でなく処理の形で決める。容量は Aurora 最大 128TiB、RDS for PostgreSQL 最大 64TiB で 10TB は入る。大量の行の集計・結合（OLAP）なら Redshift、行単位の読み書き（OLTP）なら Aurora
 - Aurora の業務データを分析に使う、ETL の運用を避けたい → Aurora から Redshift への zero-ETL 統合
 - Athena の費用を予測したい、重要なクエリを他のクエリの影響から切り離す → キャパシティ予約（DPU を確保し、ワークグループを割り当てる）。SQL の変更は不要。割り当てたワークグループのクエリだけが予約を使い、DDL / DML のクォータにも数えない
+- Aurora / RDS for PostgreSQL の pgvector で、精度を保ちつつ類似検索を速くする → HNSW インデックス（近似の最近傍検索。IVFFlat より速度と再現率の釣り合いが良いが、作成は遅く、メモリを多く使う）。インデックスが無ければ正確な全件検索で、再現率は完全だが遅い
 
 **ひっかけ**
 - 「Athena の DML の同時実行数のクォータを引き上げる」→ 同じアカウントの他のクエリと枠を共有したままなので、切り離せない。費用もスキャン量のままで予測しやすくならない
+- 「pgvector の類似検索に B-tree インデックス」→ B-tree は値の等しさと範囲の検索用で、ベクトルの距離の検索には使えない（模擬問題のセット 3 で、HNSW との二択で外した）
 - 「マテリアライズドビューがあるので RDS for PostgreSQL でも同じ」→ 1 台で動く行指向で、10TB の結合は 1 本が重い。PostgreSQL のマテリアライズドビューは REFRESH で全部作り直す
 - 「10TB なら RDS / Aurora に入るので RDS / Aurora」→ 入るかどうかでなく処理の形。集計・結合が中心なら行指向の 1 台より列指向の MPP。読み取りレプリカは同時に流せる本数を増やすだけで、1 本ごとは速くならない
 - 「データマートは RDS」→ データマートは用途ごとの分析用データという意味で、置き場所ではない。TB 級の BI 用なら Redshift / Redshift Serverless
@@ -555,6 +560,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「Redshift と S3 をまたぐ」「読み込まずに」→ Redshift Spectrum
 - 「アドホック」「たまに」「サーバーレス」「クエリした分だけ」→ Athena
 - 「Athena」「費用を予測」「他のクエリの影響を受けない」→ キャパシティ予約 + ワークグループ
+- 「pgvector」「ベクトル検索」「低レイテンシ」「精度を保つ」→ HNSW インデックス
 
 **採らなかった選択肢**
 - Redshift Serverless: 使った分だけの課金で、管理も不要。ただ、データの読み込みか Spectrum の設定が要る。S3 をたまに調べるだけなら Athena が最短
@@ -625,10 +631,12 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 他のアカウントも書き込むバケットを ACL に頼らず管理する → オブジェクト所有権を「バケット所有者の強制」にし、バケットポリシーで許可する。ACL は無効になり、すべてのオブジェクトをバケット所有者が所有する（新しいバケットの既定）
 - VPC からのデータの持ち出しを制限する → S3 のゲートウェイエンドポイントのエンドポイントポリシーで、アクセスできるバケットを限定する
 - 特定のバケットを、特定のエンドポイント経由でしか使わせない → バケットポリシーの `aws:sourceVpce`
+- Lake Formation の列の権限を付けたのに全列が見える → `IAMAllowedPrincipals` グループに Super 権限が残っている。Glue との後方互換のための初期設定で、IAM のポリシーだけでアクセスが決まり、Lake Formation の個別の権限が効かない。既存のリソースから `IAMAllowedPrincipals` の権限を外し、新しいリソースの「IAM のアクセス制御のみを使用」も外す
 
 **ひっかけ**
 - 「オブジェクトライターのままバケットポリシーで書き込みを許可」→ 書き込んだアカウントがオブジェクトを所有し、権限の管理に ACL が残る
 - 「バケットポリシーで持ち出しを防ぐ」→ 制御できるのは自分のバケットだけ。VPC の中から他のバケットへの書き込みは止まらない
+- 「Athena は Lake Formation の列の制御に対応していない」→ 対応している。効かない原因は `IAMAllowedPrincipals` の Super 権限（模擬問題のセット 3 でこれを選んで外した）
 - 「IAM やバケットポリシーで列を隠す」→ S3 の権限の単位はオブジェクト。ファイルの中の列は隠せない
 - 「個人情報を除いたコピーを CTAS で作る」→ 二重化と同期の手間。仮名化した別のデータセットを作る場面なら正解になりうる
 - 「テーブルごとに権限を付ける」→ 増えるたびに作業が要る。属性で決めるなら LF-Tags
@@ -642,6 +650,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「クロスアカウント」→ IAM ポリシー + リソースポリシー（バケットポリシー、キーポリシー）の両方
 - 「ACL に頼らず」「バケット所有者」→ バケット所有者の強制
 - 「データの持ち出し」「VPC エンドポイント経由」→ エンドポイントポリシー
+- 「Lake Formation の権限が効かない」「全列が見える」→ `IAMAllowedPrincipals` の Super 権限を外す
 
 **採らなかった選択肢**
 - Redshift の列単位の GRANT: データが Redshift の中にあるならこちら
@@ -686,6 +695,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - データの値の品質（欠損、行数、一意性、値の範囲）を管理された規則で検査、合わなければ止める → Glue Data Quality（DQDL の規則。カタログのテーブルに対して評価するか、ETL ジョブの中で EvaluateDataQuality。失敗時はジョブを止めるか、合わない行を分ける。規則の推薦あり）
 - サービスの状態の変化（Glue のジョブの失敗など）をきっかけに通知・後続を起動 → EventBridge のルール（Job State Change の FAILED → SNS / SQS / Lambda / Step Functions）
 - メトリクスがしきい値を超えたら通知 → CloudWatch のアラーム
+- Glue ジョブが長引いたら、止めずに通知する → ジョブの遅延通知のしきい値（`NotificationProperty.NotifyDelayAfter`、開始からの分数）を設定し、遅延の通知を EventBridge のルールで受けて SNS へ
 
 **ひっかけ**
 - 「CloudTrail はすべての API を既定で記録」→ 既定は管理イベントだけ。S3 のオブジェクトの読み書きはデータイベントで、証跡で有効にしないと残らない
@@ -693,11 +703,13 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「品質の検査を PySpark の assert / Athena + Lambda で」→ 動くが自前の仕組み。「管理された仕組みで」なら Glue Data Quality
 - 「Macie でデータ品質」→ Macie は機密データの検出
 - 「Lambda で 1 分ごとにジョブの状態を見る」→ 遅れと無駄な実行。状態の変化はイベントで受ける
+- 「Glue ジョブのタイムアウトを 60 分にして通知」→ タイムアウトに達するとジョブは止まり、TIMEOUT になる。「打ち切らない」に反する（既定は Glue 4.0 以前で 2,880 分、5.0 以降で 480 分。模擬問題のセット 3 で外した）
 
 **問題文のキーワード**
 - 「誰が」「いつ」「API の呼び出し」「監査」→ CloudTrail（オブジェクトの読み書きならデータイベント）
 - 「データ品質」「規則」「欠損」「完全性」「DQDL」→ Glue Data Quality
 - 「失敗したらすぐ通知」「状態の変化」→ EventBridge のルール + SNS
+- 「長引いたら通知」「打ち切らない」→ Glue の遅延通知のしきい値 + EventBridge + SNS
 
 ### 15-9. Redshift の設計（分散キー / ソートキー / COPY / VACUUM）
 
@@ -708,6 +720,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 期間などの範囲で絞り込む列 → ソートキー。ゾーンマップ（ブロックごとの最小値・最大値）で範囲外のブロックを飛ばす。条件の列が 1 つならシンプルなソートキーで足りる
 - S3 から大量に読み込む → COPY。圧縮した複数のファイルに分け、ファイル数をスライス数の倍数にして並列に読む。大きさは揃える（圧縮後 1MB〜1GB が目安）。読むファイルを明示するならマニフェスト
 - 削除・更新の後の領域の回収と並び順の整え直し → VACUUM（ソートキーの効き目を保つ保守）。統計の更新は ANALYZE
+- Redshift がバックグラウンドで自動で行う → `VACUUM DELETE`（削除した行の領域の回収）、`ANALYZE`（統計の更新）、テーブルの自動ソート。どれも負荷の低い時間に動く。大量のロードの直後に完全に並べ直したいときは、手動で `VACUUM` を実行する
 
 **ひっかけ**
 - 「数千万行の顧客の表も ALL 分散」→ 保存の量がノード数の倍になり、読み込み・更新も全ノード。ALL は小さいマスタ向け。表の行数を必ず拾う
@@ -717,12 +730,14 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「1 つの大きなファイルを COPY」→ 1 スライスしか働かない
 - 「1 行ずつ INSERT」→ 最も遅い。大量の読み込みは COPY
 - 「VACUUM でスキャン量が減る」→ ソートキーが無ければ範囲外のブロックは飛ばせない
+- 「削除の後は毎回 `VACUUM DELETE` と `ANALYZE` を手動で実行する」→ どちらも自動で行われる。手動で実行してもよいが、必須ではない
 
 **問題文のキーワード**
 - 「結合」「データの再分散を最小」→ 結合の列を分散キー
 - 「小さい次元の表」→ ALL 分散
 - 「範囲で絞り込む」「日付」→ ソートキー
 - 「大量の読み込み」「最速」→ COPY + 分割・圧縮したファイル
+- 「バックグラウンドで自動」「Redshift の保守」→ `VACUUM DELETE`、`ANALYZE`、自動ソート
 
 ### 15-10. DynamoDB の設計（パーティションキー / GSI / LSI / TTL）
 
@@ -841,6 +856,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 小さな表との結合でシャッフルが多い → 小さい側を Broadcast する。SQL は `/*+ BROADCAST(d) */`、DataFrame は `broadcast(df)`
 - 自動の Broadcast は `spark.sql.autoBroadcastJoinThreshold`（既定 10MB。要確認）以下の表だけ。超える表はヒントが要る
 - すべてのテーブルを API で取得 → `glue.get_paginator("get_tables").paginate(DatabaseName=...)`。データベースが複数なら `get_databases` も同様に回す
+- カタログのテーブルを読む Glue ジョブが全パーティションを読んで遅い → `create_dynamic_frame.from_catalog` に `push_down_predicate`（Spark SQL の WHERE と同じ書き方、例: `dt = '2026-11-10'`）を指定する。カタログのパーティション情報で絞ってから S3 を一覧・読み込みするので、不要なパーティションを読まない
+- パーティションが数百万あり、カタログからの一覧自体が遅い → `catalogPartitionPredicate`（パーティションインデックスを使い、カタログ側で絞る）。`push_down_predicate` と併用できる
 
 **ひっかけ**
 - 「ワーカーの種類と数を増やして小さなファイルに対応」→ コストが増え、根本解決にならない
@@ -851,6 +868,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「`spark.sql.shuffle.partitions` を増やす」→ シャッフルの分割数が変わるだけで、シャッフル自体は無くならない
 - 「`repartition(1)` してから結合」→ 1 タスクに処理が集中する
 - 「`get_tables` を 1 回呼ぶ」→ 結果がページ分割され、残りを取り逃す
+- 「全部読んでから DynamicFrame の `filter` で前日分に絞る」→ 読み込みは全パーティション分かかる。読む前に絞るのが `push_down_predicate`
 
 **問題文のキーワード**
 - 「数十万の小さなファイル」「ドライバーの OOM」→ `groupFiles` / `groupSize`
@@ -858,6 +876,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「ローカル」「PyTest」「コストをかけずに」→ Glue の Docker イメージ
 - 「小さなディメンション」「シャッフルを減らす」→ Broadcast
 - 「すべて取得」「Boto3」→ ページネーター
+- 「全パーティションを読む」「前日分だけ」「from_catalog」→ `push_down_predicate`
 
 ### 15-15. Kinesis のコンシューマーの遅れとパーティションキー / Lambda のイベントフィルタ
 
@@ -884,7 +903,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 「ホットシャード」→ カーディナリティの高いキー
 - 「大半のレコードは対象外」「関数を変更せずに」→ イベントソースマッピングのフィルター条件
 
-### 15-16. Step Functions の Standard / Express と統合パターン
+### 15-16. Step Functions の Standard / Express と統合パターン / Map
 
 13. と 15-5 も参照。
 
@@ -893,18 +912,22 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 5 分以内、大量、高頻度 → Express。課金は実行回数・時間・メモリ。非同期は at-least-once、同期は at-most-once
 - ジョブの完了を待って次へ進む → `.sync`。Glue は `arn:aws:states:::glue:startJobRun.sync`
 - 外部の処理からの完了通知を待つ → `.waitForTaskToken` + `SendTaskSuccess`
+- S3 の大量のオブジェクト（数十万〜数百万ファイル）を 1 つずつ並列処理する → 分散モードの Map（Distributed Map）。`ItemReader` で S3 のプレフィックスを項目のソースにする（CSV / JSON のファイル 1 つを行ごとに処理することもできる）。各項目は子ワークフローとして動き、並列数は既定で最大 10,000
+- 分散モードにする目安 → データセットが 256 KiB を超える、実行履歴が 25,000 件を超える、40 を超える並列数が要る。どれにも当たらなければインラインモードで足りる
 
 **ひっかけ**
 - 「`.sync` なしの `startJobRun` で完了を待つ」→ ジョブを開始しただけで次のステートへ進む
 - 「固定秒数の Wait を挟む」→ 実行時間が変わると破綻する
 - 「`GetJobRun` をポーリングする Lambda とループを作る」→ 動くが運用負荷が増える
 - 「Express で 30 分のジョブの完了を待つ」→ 最長 5 分で、`.sync` と `.waitForTaskToken` も使えない
+- 「100 万個のファイルの一覧を配列にして、インラインの Map に渡す」→ 一覧が 256 KiB を超え、並列数も 40 までになる。分散モードで S3 から直接読ませる（模擬問題のセット 3 で外した）
 
 **問題文のキーワード**
 - 「完了を待って」「完了後に」→ `.sync`
 - 「コールバック」「人の承認」「外部システムからの通知」→ `.waitForTaskToken`
 - 「長時間」「監査」「厳密に 1 回」→ Standard
 - 「毎秒大量」「短時間」「IoT」→ Express
+- 「数百万のオブジェクト」「S3 のプレフィックス」「大規模な並列」→ 分散モードの Map
 
 ### 15-17. 細かい機能（S3 → EventBridge / MemoryDB / MWAA の requirements.txt / SQS のロングポーリング / ウィンドウ関数）
 
