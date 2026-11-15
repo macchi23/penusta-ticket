@@ -68,6 +68,7 @@ docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-da
   - [（2）コンテナの中の localhost は届かない](https://qiita.com/macchi23/items/8a8141361ed0115fc08f)
   - [（3）チケットの二重販売をどう防ぐか](https://qiita.com/macchi23/items/aa4cd6f139a90e276f93)
   - [（4）管理画面で座席の割当を変えるとき、購入とどう直列化するか](https://qiita.com/macchi23/items/af724e79acda2c9a4789)
+  - [（5）合成データに仕込んだ答えは、本当に SQL で見えるか](https://qiita.com/macchi23/items/ab66bd7136a268df3fff)
   - [（番外 1）Claude Code をサブエージェントで分業させ、仕組みは台帳で育てる](https://qiita.com/macchi23/items/f321a699d61b38cd7636)
   - [（番外 2）`.gitignore` では履歴から消えない ― リポジトリを履歴ごと public にする前と後にやった 7 つのこと](https://qiita.com/macchi23/items/04632684f9e242e86967)
 
