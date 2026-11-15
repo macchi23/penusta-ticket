@@ -3,6 +3,8 @@
 namespace App\Console\Commands;
 
 use App\Models\ActivityEvent;
+use App\Support\Export\ExportFailedException;
+use App\Support\Export\GzipJsonlExporter;
 use Carbon\CarbonImmutable;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Storage;
@@ -92,77 +94,28 @@ class ExportEvents extends Command
         $dt = $day->format('Y-m-d');
         $dir = self::PREFIX."/dt={$dt}";
         $key = "{$dir}/part-0000.jsonl.gz";
-        $lower = $day->utc();
-        $upper = $day->addDay()->utc();
 
         $query = ActivityEvent::query()
-            ->where('occurred_at', '>=', $lower)
-            ->where('occurred_at', '<', $upper);
+            ->where('occurred_at', '>=', $day->utc())
+            ->where('occurred_at', '<', $day->addDay()->utc());
 
-        $rows = 0;
-        $stream = fopen('php://temp', 'w+b');
-        $filter = stream_filter_append($stream, 'zlib.deflate', STREAM_FILTER_WRITE, ['window' => 31]);
-        $failure = $filter === false ? 'gzip フィルタを設定できませんでした' : null;
+        $rows = (function () use ($query) {
+            foreach ($query->lazyById(1000) as $event) {
+                yield $this->toRow($event);
+            }
+        })();
 
         try {
-            if ($failure === null) {
-                foreach ($query->lazyById(1000) as $event) {
-                    $line = json_encode($this->toRow($event), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR)."\n";
-                    if (fwrite($stream, $line) !== strlen($line)) {
-                        $failure = "一時ストリームへの書き込みに失敗しました (id={$event->id})";
-                        break;
-                    }
-                    $rows++;
-                }
-            }
-            if ($failure === null && stream_filter_remove($filter) === false) {
-                $failure = 'gzip フィルタの終了に失敗しました';
-            }
-        } catch (Throwable $e) {
-            $failure = 'エンコードに失敗しました: '.$e->getMessage();
-        }
-
-        try {
-            if ($failure !== null) {
-                $this->error("dt={$dt} {$failure}");
-
-                return false;
-            }
-            if ($rows > 0) {
-                rewind($stream);
-                if ($disk->writeStream($key, $stream) === false) {
-                    $this->error("書き込みに失敗しました: {$key}");
-
-                    return false;
-                }
-            }
-        } finally {
-            fclose($stream);
-        }
-
-        $deleted = 0;
-        try {
-            $existingKeys = $disk->allFiles($dir);
-        } catch (Throwable $e) {
-            $this->error("dt={$dt} key={$dir}/ 一覧の取得に失敗しました: ".$e->getMessage());
+            $result = app(GzipJsonlExporter::class)->export($disk, $dir, $key, $rows, "dt={$dt}");
+        } catch (ExportFailedException $e) {
+            $this->error($e->getMessage());
 
             return false;
         }
-        foreach ($existingKeys as $existing) {
-            if ($rows > 0 && $existing === $key) {
-                continue;
-            }
-            if ($disk->delete($existing) === false) {
-                $this->error("削除に失敗しました: {$existing}");
 
-                return false;
-            }
-            $deleted++;
-        }
-
-        $this->line($rows > 0
-            ? "dt={$dt} rows={$rows} key={$key} deleted={$deleted}"
-            : "dt={$dt} rows=0 deleted={$deleted}");
+        $this->line($result['rows'] > 0
+            ? "dt={$dt} rows={$result['rows']} key={$key} deleted={$result['deleted']}"
+            : "dt={$dt} rows=0 deleted={$result['deleted']}");
 
         return true;
     }

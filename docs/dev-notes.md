@@ -119,7 +119,7 @@ JOIN users u ON u.id=o.user_id GROUP BY st.name;
 期待値（2026-10-11、`--seasons=7`。上のクエリの基準日を `m.kickoff_at::date` にした版）: 北 = 平均 37 歳・男性 66%、南 = 36 歳・68%、バック = 41 歳・55%、メイン = 47 歳・55%。
 ビッグマッチ（opponent_popularity=5）は大規模アウェー配置（S1〜S8=away, S9=buffer）、通常は S1〜S4=away, S5=buffer。
 
-ここは tickets / orders / users を Postgres で直接見る整合確認用。events 由来の分析（ファネル等）は `analytics/`（DuckDB）に置く。
+ここは users を含む整合確認を Postgres で直接見る場所。users を使わない分析（ファネル、試合・席種別の枚数）は `analytics/`（DuckDB）に置く。
 
 ## イベントログのエクスポートと分析（2026-10-04）
 
@@ -148,6 +148,27 @@ scripts/analytics.sh shell     # DuckDB の対話モード
   purchase 809,653（orders と一致）。順序つき到達も 809,653。build は約 15 秒
 - export の全期間は `--from=2021-01-01 --to=2026-12-31`（約 2.5 分）。0 件の日は既存キーを消すので、旧データの残骸もこれで消える
 - 前日分は scheduler が毎日 00:30 UTC（JST 09:30）に自動で出す（下の「scheduler」）
+
+#### 業務テーブル（`tables:export`、2026-11-16）
+
+```bash
+docker compose exec app php artisan tables:export                          # 15 表すべて（約 25 秒）
+docker compose exec app php artisan tables:export --table=matches --table=teams
+scripts/analytics.sh query sold_by_round                                  # analytics/queries/<名前>.sql（_pg で終わるものは psql 用で弾く）
+```
+
+- 対象: seasons, teams, matches, league_standings, league_matches, stands, seat_categories, blocks, match_block_allocations,
+  ticket_types, match_prices, sale_phases, orders, order_items, tickets。列は `ExportTables` のホワイトリストで表ごとに明示（列が増えても勝手に出ない）
+- 出さないもの: users（個人情報。仮名化と列レベル権限は 2-6）、`tickets.qr_uuid`（入場用の値）、`blocks.geometry`（描画用で大きい）、
+  `matches.attributes` の既知の 9 キー以外。memberships / season_pass_seats / resale 系 / 割当の監査表もまだ出していない
+- レイアウト: `raw/<table>/part-0000.jsonl.gz` の全量スナップショットを毎回上書き（パーティションなし）。events は追記だけなので日付で増分、
+  業務テーブルは状態が変わる（試合の status、注文の paid など）ので全量。0 件の表も空の gzip を書く（DuckDB の `read_json` はファイルが無いと失敗する）
+- 15 表は `REPEATABLE READ READ ONLY` のトランザクションで読み、同じ時点のスナップショットにする
+- curated は `curated/<table>/part-0.parquet`。`scripts/analytics.sh build` は raw に 16 個の prefix が揃っていないと止まる
+- scheduler は events:export の後、毎日 00:40 UTC
+- 確認（2026-11-16、`--seasons=7`）: orders 919,162 / tickets 1,555,115 が開発 DB と一致。`sold_by_round` は 1-5 の記事の PostgreSQL の結果と一致。
+  `sold_per_match_by_category` は割当で絞らず away に割り当てたブロックの販売も席種に含める（calibration_pg.sql とは定義が違う）
+- 実 AWS への同期（`aws-analytics.sh sync`）と Glue のテーブル定義はまだ events だけ（2-2 で足す）
 
 ## scheduler（2026-10-04）
 
@@ -360,7 +381,7 @@ AdminUserSeeder は冪等。未販売の試合は 2026-27 の AS_OF（2026-10-08
 
 ### 分析の準備
 
-- **エクスポートは events だけ**: 相手・天気・順位・価格は `matches` と `match_prices` にしか無く、`events:export` も `analytics/` も持っていない。需要の答えを第 2 部で確かめるなら次元データの出し方を 2-1 までに決める
+- ~~エクスポートは events だけ~~: 2026-11-16 に `tables:export` で業務テーブル 15 表を足した（上の「イベントログのエクスポートと分析」）。users は 2-6 まで出さない
 - **calibration の数字が再現しきれていない**: `demo-data.md` の表は 2021 が .53、2025 が .85 だが、1-5 の素材集めで別の定義で測ると .498 / .829。定義の差か、その後の変更かは未確定。`analytics/queries/calibration_pg.sql` を流して確かめる（TEMP VIEW を作るので読み取り専用の接続では動かない）
 - 規模の数字が `demo-data.md` / `dev-notes.md` / `dea-exercises.md` / 公開記事に散っていて毎回ずれる
 

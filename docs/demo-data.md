@@ -10,6 +10,7 @@
 docker compose exec app php artisan migrate:fresh --seed --force                              # 構造データ（常に 7 シーズン分）
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data --seasons=7 # 取引データ（分析用の全量）
 docker compose exec app php artisan events:export --from=2021-01-01 --to=2026-12-31          # RustFS へ（約 2.5 分）
+docker compose exec app php artisan tables:export                                            # 業務テーブル 15 表を RustFS へ（約 25 秒）
 scripts/analytics.sh build && scripts/analytics.sh funnel
 ```
 

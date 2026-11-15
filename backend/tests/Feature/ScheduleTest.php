@@ -60,4 +60,40 @@ class ScheduleTest extends TestCase
         $this->travelTo(Carbon::parse('2026-10-05 01:30:00', 'UTC'));
         $this->assertFalse($event->isDue($this->app));
     }
+
+    public function test_export_tables_is_scheduled(): void
+    {
+        $events = app(Schedule::class)->events();
+        $exportTables = array_filter(
+            $events,
+            fn ($e) => Event::normalizeCommand($e->command) === 'php artisan tables:export'
+        );
+
+        $this->assertCount(1, $exportTables);
+        $event = reset($exportTables);
+        $this->assertSame('40 0 * * *', $event->expression);
+        $this->assertTrue($event->withoutOverlapping);
+        $this->assertSame(60, $event->expiresAt);
+        $this->assertNotSame($event->getDefaultOutput(), $event->output);
+    }
+
+    public function test_export_tables_is_due_at_00_40(): void
+    {
+        $events = app(Schedule::class)->events();
+        $exportTables = array_filter(
+            $events,
+            fn ($e) => Event::normalizeCommand($e->command) === 'php artisan tables:export'
+        );
+
+        $event = reset($exportTables);
+
+        $this->travelTo(Carbon::parse('2026-10-05 00:40:00', 'UTC'));
+        $this->assertTrue($event->isDue($this->app));
+
+        $this->travelTo(Carbon::parse('2026-10-05 00:39:00', 'UTC'));
+        $this->assertFalse($event->isDue($this->app));
+
+        $this->travelTo(Carbon::parse('2026-10-05 01:40:00', 'UTC'));
+        $this->assertFalse($event->isDue($this->app));
+    }
 }

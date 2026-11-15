@@ -27,3 +27,8 @@ Schedule::command('events:export')
     ->dailyAt('00:30')
     ->withoutOverlapping(60)
     ->onFailure($handleFailure('events:export'));
+
+Schedule::command('tables:export')
+    ->dailyAt('00:40')
+    ->withoutOverlapping(60)
+    ->onFailure($handleFailure('tables:export'));
