@@ -135,17 +135,19 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 - レイアウト（バケット `penusta-events`）:
   - `raw/events/dt=YYYY-MM-DD/part-0000.jsonl.gz`: `events:export` が書く gzip JSON Lines。dt は occurred_at の **UTC** 日付。
     1 dt = 1 ファイル。再実行すると固定キーを上書きし、同じ dt 配下の他キーを消す（二重にならない）
-  - `curated/events/dt=YYYY-MM-DD/part-0.parquet`: DuckDB が raw から作る。build のたびに作り直す
-  - ファイルに dt 列は入れない（Athena でパーティション列と重複するとエラー）。実 S3 へは `aws s3 sync` で同じ形のまま移せる
+  - `curated/events/dt=YYYY-MM-DD/part-0.parquet`: DuckDB が raw から作る。build のたびに作り直す。1 dt 1 ファイルに固定している
+    （同時に開くファイルの上限 `partitioned_write_max_open_files` の既定 100 だと、閉じた dt に後から行が来て part-1 ができる。COPY の間だけ 10000 にし、
+    build の最後に part-0 以外が無いことを確かめる）
+  - ファイルに dt 列は入れない（Athena はテーブルの列とパーティション列の名前が重なるとエラー。パスから取れば足りる）。実 S3 へは `aws s3 sync` で同じ形のまま移せる
   （実際に `scripts/aws-analytics.sh sync` で移した。下の「実 AWS」）
 - E2E 由来（`session_id LIKE 'e2e00000-0000-4000-8000-%'`、`e2e/lib/session.ts` の固定部分）と `session_id = 'unknown'` は raw には残し、
-  DuckDB の `events_clean` ビューで除外する。`'e2e0%'` だと合成データの UUID が偶然一致したセッション（1 件）まで消える
+  DuckDB の `events_clean` ビューで除外する。`'e2e0%'` だと合成データの UUID が偶然一致したセッション（37 セッション・79 件、2026-11-16）まで消える
 - DuckDB は compose の `analytics` サービス（`duckdb/duckdb:1.5.6`、profile `analytics`）。RustFS へは `rustfs:9000`。
   シークレットは `analytics/setup.sql` で毎回一時作成（PERSISTENT は平文でディスクに残るので使わない）。TimeZone は UTC に固定
 - 非対話の `docker compose run` は `-T` が要る（無いと `-c` が compose のフラグとして解釈される）。イメージは distroless でシェルが無い
 - `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
-- ファネル（2026-10-11、`--seasons=7`）: (session_id, match_id) 単位で view_match 2,443,792 → view_seatmap 1,637,323 → add_to_cart 1,139,926 →
-  purchase 809,653（orders と一致）。順序つき到達も 809,653。build は約 15 秒
+- ファネル（2026-11-16、`--seasons=7`、リセールを買ったセッションを除く）: (session_id, match_id) 単位で view_match 2,149,161 → view_seatmap 1,340,509 →
+  add_to_cart 842,734 → purchase 511,571。順序つき到達も 511,571。orders（kind=purchase）511,587 との差は E2E の 16 件。build は約 17 秒
 - export の全期間は `--from=2021-01-01 --to=2026-12-31`（約 2.5 分）。0 件の日は既存キーを消すので、旧データの残骸もこれで消える
 - 前日分は scheduler が毎日 00:30 UTC（JST 09:30）に自動で出す（下の「scheduler」）
 
@@ -178,7 +180,9 @@ compose の `scheduler` サービスが `php artisan schedule:work` を常駐さ
 | コマンド | 頻度 | 重複防止 |
 |---|---|---|
 | `tickets:expire-holds` | 毎分 | なし（1 件ずつ `FOR UPDATE SKIP LOCKED` なので並走しても安全） |
+| `resale:expire-listings` | 毎分 | なし |
 | `events:export`（前日 UTC 分） | 毎日 00:30 UTC | `withoutOverlapping(60)`（Redis ロック、期限 60 分） |
+| `tables:export`（業務テーブル 15 表の全量） | 毎日 00:40 UTC | `withoutOverlapping(60)` |
 
 ```bash
 docker compose logs -f scheduler                                   # 毎分の Running [...] DONE / FAIL と失敗時の Log::error

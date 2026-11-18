@@ -1,7 +1,12 @@
 -- events を curated へ Parquet 出力する。payload は Athena / Glue 互換のため JSON 型ではなく VARCHAR で書く。
+-- PARTITION_BY の writer はスレッド間で共有され、開いている数が partitioned_write_max_open_files（既定 100）に達すると 1 本閉じられる。
+-- 閉じた dt に後から行が来ると part-1 が開かれ、1 dt が割れる（並列だと dt をまたいで行が来るため。events は dt 順なので threads=1 だと起きない）。
+-- dt の数（1,853）より大きい上限にして、閉じさせない。
+SET partitioned_write_max_open_files = 10000;
 COPY (SELECT * REPLACE (CAST(payload AS VARCHAR) AS payload) FROM events)
   TO 's3://penusta-events/curated/events'
   (FORMAT parquet, PARTITION_BY (dt), OVERWRITE_OR_IGNORE, FILENAME_PATTERN 'part-{i}');
+RESET partitioned_write_max_open_files;
 
 -- 業務テーブル（パーティションなし。json 列は VARCHAR）。
 COPY seasons TO 's3://penusta-events/curated/seasons/part-0.parquet' (FORMAT parquet);

@@ -27,7 +27,7 @@ scripts/analytics.sh build && scripts/analytics.sh funnel
 | `--seasons=1` | 約 9 秒 | 4 万 | 9 万 | 36 万 | 0.2GB |
 
 `--seasons=7` は 2026-10-11 の年パス発行への置き換え（orders・tickets は全試合分の発行で増え、events は引換のセッションが無くなって 494 万に減った）と、2026-10-13 のリセール追加の後の値。`--seasons=1` と RustFS の容量は置き換え前の値。
-RustFS 上は raw 171MB / curated 223MB（`--seasons=7`、置き換え前）。
+RustFS 上は raw 179.65MB（events 137.2 + 業務テーブル 42.5）/ curated 241.2MB（185.4 + 55.8）（`--seasons=7`、2026-11-16）。
 
 - 同じ引数なら全テーブルが一致する（用途キーごとの `SeededRandom`。UUID・created_at も決定的）。`--seasons` を変えても、ある試合の内容は変わらない
 - `USE_ZEND_ALLOC=0` は必須のまま（無いと規模が大きいとき警告）。COPY で書くので全量でも 2 分かからない

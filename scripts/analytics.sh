@@ -38,6 +38,23 @@ check_raw() {
   fi
 }
 
+# curated/events は 1 dt 1 ファイル（part-0.parquet）の前提。part-1 以降があれば、その dt を並べて止める
+check_curated_single_file() {
+  local listing extra
+  # 0 件（rc 1）も失敗として扱う。export_curated.sql の後に curated/events が空なのは異常
+  listing=$(docker compose --profile tools run --rm -T aws s3 ls s3://penusta-events/curated/events/ --recursive) || {
+    echo "curated/events の一覧を取れなかった（空か、取得に失敗）" >&2
+    exit 1
+  }
+  # dt=*/part-0.parquet 以外の行はすべて異常。パス（4 列目）ごと出す
+  extra=$(grep -vE '[[:space:]]curated/events/dt=[0-9-]+/part-0\.parquet$' <<<"$listing" | awk '{print $4}' || true)
+  if [ -n "$extra" ]; then
+    echo "curated/events に dt=*/part-0.parquet 以外のファイルがある:" >&2
+    echo "$extra" >&2
+    exit 1
+  fi
+}
+
 case "${1:-}" in
   build)
     check_raw
@@ -47,6 +64,7 @@ case "${1:-}" in
     docker compose --profile tools run --rm -T aws \
       s3 rm s3://penusta-events/curated/ --recursive >/dev/null
     duck -c ".read export_curated.sql"
+    check_curated_single_file
     ;;
   funnel) duck -c ".read queries/funnel_by_match.sql" ;;
   query)

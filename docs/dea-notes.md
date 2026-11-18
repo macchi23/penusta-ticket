@@ -22,7 +22,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - `raw/events/dt=YYYY-MM-DD/part-0000.jsonl.gz`（`backend/app/Console/Commands/ExportEvents.php`）
-- dt は occurred_at（イベント時刻）の UTC 日付。1 日あたり最大 1,700 行程度なので日単位で十分
+- dt は occurred_at（イベント時刻）の UTC 日付。1 日は中央 2,666 行・最大 7,656 行（gzip で中央 72.5KB・最大 207KB、2026-11-16 実測）。
+  量としては日単位でも細かすぎる（DuckDB の目安は 1 パーティション 100MB 以上）が、日次の書き出しと上書きの単位に合わせて日で切っている
 - ファイルの中に dt 列は入れない（パスから取る）
 
 **AWS での対応**
@@ -34,7 +35,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 - 日付のように規則的に増えるパーティションで、登録の手間をなくしたい → partition projection（Athena のテーブルプロパティで範囲と形式を定義）
 - パスが `key=value` 形式 → `MSCK REPAIR TABLE` で一括登録できる
 - パスが `2026/08/23/` のように key が無い形式 → `MSCK REPAIR TABLE` は使えない。`ALTER TABLE ADD PARTITION` か partition projection
-- パーティション列と同名の列をファイル内に持たない → Athena でエラーになる
+- パーティション列と同名の列をテーブルの列に定義しない → Athena でエラーになる（公式: "If you use a value for col_name that is the same as a table column, you get an error."、create-table）。
+  ペヌスタはファイルにも dt を入れない（DuckDB の COPY も `WRITE_PARTITION_COLUMNS` の既定 false で書かない）
 
 **ひっかけ**
 - 「毎日 Glue クローラを回して新しいパーティションを登録」→ 動くがコストと遅延が余計。規則的な日付なら partition projection の方が良い
@@ -54,10 +56,12 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **ペヌスタでの使い方**
 - dt は「イベントが起きた時刻（occurred_at）」の UTC 日付。エクスポートを実行した時刻ではない
 - JST の日付は DuckDB 側で `jst_date` 列として作る（`analytics/build.sql`）
-- UTC と JST で日付が変わるイベントは全体の約 37%（76,476 / 204,655）。試合単位の分析は match_id で絞るので dt の基準に依存しない
+- UTC と JST で日付が変わるイベントは 37.53%（1,897,845 / 5,056,432、2026-11-16）。合成データの時刻帯がほぼ一様なので 9/24 と同じになるだけ（実データ 236 件では 67%）。
+  試合単位の分析は match_id で絞るので dt の基準に依存しない
 
 **AWS での対応**
-- Firehose の S3 プレフィックス（既定 `YYYY/MM/DD/HH/`）は **到着時刻の UTC** で切られる
+- Firehose の S3 プレフィックス（既定 `YYYY/MM/DD/HH/`）は **到着時刻の UTC** で切られる。基準はオブジェクト内で最も古いレコードの到着時刻。
+  タイムゾーンは CustomTimeZone で変えられる（公式 s3-prefixes: "By default, timestamp is in UTC"）
 - イベント時刻やレコード内の値で切りたい → Firehose の動的パーティショニング（JQ 式でキーを取り出す。追加料金あり）
 - Kinesis Data Streams のレコードには `ApproximateArrivalTimestamp`（到着時刻）が付く
 
@@ -81,7 +85,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - PHP からは JSON Lines（行指向）で出す。PHP で Parquet を書くのは現実的でないため
-- DuckDB が JSON Lines を読んで Parquet（列指向）に変換し、`curated/events/dt=*/part-0.parquet` に書く（`analytics/export_curated.sql`）
+- DuckDB が JSON Lines を読んで Parquet（列指向）に変換し、`curated/events/dt=*/part-0.parquet` に書く（`analytics/export_curated.sql`）。
+  サイズは Parquet（Snappy）の方が gzip の JSON Lines より 1.35 倍大きい（events 185.4MB 対 137.2MB。session_id の UUID 文字列が curated の 49%）
 - payload（JSON）は Parquet では VARCHAR として書く（Athena / Glue が JSON 論理型を扱えない可能性があるため）
 
 **AWS での対応**
@@ -110,7 +115,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - raw の JSON Lines は gzip（`.jsonl.gz`）。DuckDB も Athena も拡張子で自動判定する
-- Parquet は DuckDB の既定の圧縮（Snappy、要確認）
+- Parquet は DuckDB の既定の圧縮（Snappy。COPY の既定 `snappy`、全ファイルで確認済み 2026-11-16）
 
 **AWS での対応**
 - Athena / Glue / EMR は gzip、bzip2、Snappy、ZSTD、LZO などを読める
@@ -133,11 +138,15 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 ## 5. ファイルサイズ（small files 問題）
 
 **ペヌスタでの使い方**
-- 1 dt = 1 ファイル。1 日分が gzip で約 400KB（旧データでの最大。7 シーズン化後も 1 日の最大は数 MB 程度の見込みで、未計測）なので分割しない
-- DuckDB の Parquet 出力も 1 dt 1 ファイルになることを確認した
+- 1 dt = 1 ファイル。1 日分は gzip で中央 72.5KB・最大 207KB（2026-11-16、1,853 dt）なので分割しない
+- DuckDB の PARTITION_BY は、同時に開いておくファイル数に上限がある（`partitioned_write_max_open_files`、既定 100）。dt は 1,853 個あるので、
+  書き出しの途中で閉じられた dt に後から行が来ると part-1 が新しく開かれ、build のたびに 2〜8 個の dt が 2 ファイルになった（2026-11-16〜17 の測定）。
+  events の COPY だけ上限を 10000 に上げて 1 dt 1 ファイルにし、build の最後に part-0 以外が無いことを確かめている（`analytics/export_curated.sql`、`scripts/analytics.sh`）。
+  threads=1 でも直るが、それは events が dt 順に並んでいるからで、並びに依存する
 
 **AWS での対応**
-- Athena のパフォーマンス指針では、ファイルが小さすぎる（128MB 未満が目安、要確認）とファイルを開くオーバーヘッドが支配的になる
+- Athena のパフォーマンス指針では、ファイルが小さすぎる（128MB 未満が目安、要確認）とファイルを開くオーバーヘッドが支配的になる。
+  DuckDB の公式は "at least 100 MB of data per partition" を勧める
 - 小さなファイルをまとめる手段: Glue ETL での coalesce / repartition、Athena CTAS で書き直し、Iceberg の `OPTIMIZE`（compaction）、Firehose のバッファ（サイズ・時間）を大きくする
 
 **判断ルール**
@@ -278,7 +287,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - 日次のバッチエクスポート（`events:export`）。リアルタイム性は不要（分析は翌日で十分）
-- スケジュール実行はまだない（scheduler サービス未導入）
+- スケジュール実行は scheduler サービス（13. 参照）
 
 **AWS での対応**
 - ストリーミング取り込み: Kinesis Data Streams（シャード単位で順序保証、保持期間中は再生可能）、Amazon Data Firehose（バッファして S3 / Redshift / OpenSearch などへ配送、ほぼリアルタイム、再生不可）、MSK（Kafka）
@@ -365,10 +374,12 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 **ペヌスタでの使い方**
 - compose の `scheduler` サービスで `php artisan schedule:work` を常駐させる。定義は `backend/routes/console.php`
 - `events:export` は毎日 00:30 UTC に前日（UTC）分を出す。イベントは記録時刻＝サーバー時刻で、遅れて届くのは秒単位なので 30 分待てば確定する
+- `tables:export`（業務テーブル 15 表の全量）は毎日 00:40 UTC。events とは別のトランザクションなので、両者は同じ時点ではない
 - `withoutOverlapping(60)` で二重起動を防ぐ（ロックは Redis）。既定のロック期限 24 時間だと、強制終了で残ったロックが翌日分を止めるので 60 分に縮めた
 - `tickets:expire-holds` は毎分。1 件ずつ `FOR UPDATE SKIP LOCKED` で回収するので並走しても安全で、ロックは付けない
 - 失敗は `onFailure` でコマンドの出力ごと `Log::error` → stderr → `docker compose logs scheduler`
-- 止まっていた間の分は取り戻さない（cron と同じ）。取りこぼした日は `--date` で手動で出し直す。冪等な上書きなので何度出してもよい（7. 参照）
+- 止まっていた間の分は取り戻さない（cron と同じ）。取りこぼした日は `--date` で手動で出し直す。冪等な上書きなので何度出してもよい（7. 参照）。
+  実例: 2026-11-16 の 00:30 / 00:40 UTC は Mac のスリープで走らなかった
 
 **AWS での対応**
 - 時刻起動: EventBridge Scheduler（cron / rate / 1 回限り、タイムゾーン指定、flexible time window、リトライと DLQ、at-least-once 配信）。ターゲットに ECS RunTask、Lambda、Step Functions StartExecution など
