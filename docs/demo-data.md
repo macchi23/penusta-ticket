@@ -9,8 +9,8 @@
 ```bash
 docker compose exec app php artisan migrate:fresh --seed --force                              # 構造データ（常に 7 シーズン分）
 docker compose exec -e USE_ZEND_ALLOC=0 app php artisan penusta:generate-demo-data --seasons=7 # 取引データ（分析用の全量）
-docker compose exec app php artisan events:export --from=2021-01-01 --to=2026-12-31          # RustFS へ（約 2.5 分）
-docker compose exec app php artisan tables:export                                            # 業務テーブル 15 表を RustFS へ（約 25 秒）
+docker compose exec app php artisan events:export --from=2021-01-01 --to=2026-12-31          # RustFS へ（時間は下の「規模」）
+docker compose exec app php artisan tables:export                                            # 業務テーブル 15 表を RustFS へ
 scripts/analytics.sh build && scripts/analytics.sh funnel
 ```
 
@@ -21,13 +21,27 @@ scripts/analytics.sh build && scripts/analytics.sh funnel
 | `--seed` | 42 | 取引データの乱数。リーグの結果は `DemoScenario::DEFAULT_SEED` で固定 |
 | `--browse` | 3.0 | 1 購入あたりの離脱セッション数 |
 
-| 規模（scale=1。`--seasons=7` は 2026-11-07 実測、`--seasons=1` は 2026-10-11 実測） | 時間 | orders | tickets | events | DB |
-|---|---|---|---|---|---|
-| `--seasons=7` | 約 107 秒 | 91.9 万 | 155.5 万 | 505.6 万 | 2.0GB |
-| `--seasons=1` | 約 9 秒 | 4 万 | 9 万 | 36 万 | 0.2GB |
+## 規模（件数・サイズ・時間の正）
 
-`--seasons=7` は 2026-10-11 の年パス発行への置き換え（orders・tickets は全試合分の発行で増え、events は引換のセッションが無くなって 494 万に減った）と、2026-10-13 のリセール追加の後の値。`--seasons=1` と RustFS の容量は置き換え前の値。
-RustFS 上は raw 179.65MB（events 137.2 + 業務テーブル 42.5）/ curated 241.2MB（185.4 + 55.8）（`--seasons=7`、2026-11-16）。
+規模の数字はこの節を正とする。他の docs・記事はここを参照し、数字を書き写さない（書くなら測った日を添える）。測り直したらここを直す。
+
+| 項目（scale=1、`--seasons=7`） | 値 | 測った日 |
+|---|---|---|
+| 試合 / シーズン | 123 / 7（2026-27 は finished 5 / 販売途中 3 / 未販売 11） | 2026-11-06 |
+| ユーザー | 90,002（合成 9 万 + 管理者 + test@example.com） | 2026-11-06 |
+| orders / order_items / tickets | 919,162 / 1,555,115 / 1,555,115 | 2026-11-16 |
+| events | 5,056,432（うち実データ 236） | 2026-11-16 |
+| events の dt | 1,853 個（2021-01-10〜2026-11-01、暦日 2,122 日）。1 dt は中央 2,666 行・最大 7,656 行（2022-04-28） | 2026-11-16 |
+| PostgreSQL 全体 / events | 2,016MB / 1,288MB | 2026-11-06 |
+| RustFS raw | 179.65MB（events 137.2 + 業務テーブル 42.5）。raw/events の 1 dt は gzip で中央 72.5KB・最大 207KB | 2026-11-16 |
+| RustFS curated | 241.2MB（events 185.4 + 業務テーブル 55.8）。events は 1 dt 1 ファイル | 2026-11-17 |
+| 生成（`penusta:generate-demo-data --seasons=7`） | 約 107 秒 | 2026-11-07 |
+| `events:export` 全期間 / 1 日 | 2 分 23 秒（`--from=2021-01-01 --to=2026-12-31`、2,191 日） / 0.4〜0.6 秒 | 2026-11-16 |
+| `tables:export` | 約 23.5 秒 | 2026-11-16 |
+| `scripts/analytics.sh build` | 19〜25 秒（最後の 1 dt 1 ファイルの確認を含む） | 2026-11-18 |
+| `--seasons=1` | 生成 約 9 秒、orders 4 万 / tickets 9 万 / events 36 万、DB 0.2GB | 2026-10-11（年パス発行への置き換え前） |
+
+経緯: 2026-10-11 に年パスの引換を全員分の発行に置き換え（orders・tickets は全試合分の発行で増え、events は引換のセッションが無くなって 603 万から 494 万に減った）、2026-10-13 にリセールを足して今の値になった。
 
 - 同じ引数なら全テーブルが一致する（用途キーごとの `SeededRandom`。UUID・created_at も決定的）。`--seasons` を変えても、ある試合の内容は変わらない
 - `USE_ZEND_ALLOC=0` は必須のまま（無いと規模が大きいとき警告）。COPY で書くので全量でも 2 分かからない

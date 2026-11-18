@@ -15,8 +15,8 @@ docker compose 8サービス（app/scheduler/web/frontend/db/redis/rustfs/mailpi
   backend は `X-Demo-User-Id` ヘッダを guard `demo` で受けるが、`DEMO_AUTH_ENABLED=true` かつ `APP_ENV` が
   local / testing のときだけ有効。frontend 側も `DEMO_AUTH_ENABLED`（compose.yaml）で同じ判定をする
 - 投入済みデータ（2026-10-11、`--seasons=7`）: 7 シーズン 123 試合（2026-27 は finished 5 / 販売途中 3 / 未販売 11）/
-  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）/ ユーザー 90,002（合成 9 万 + 管理者 + test@example.com）/ 注文 91.9 万 / チケット 155.5 万 / イベント 505.6 万（2026-11-06 実測）。
-  合成データの仕様・規模・特徴量の約束は [demo-data.md](demo-data.md)
+  スタジアム 2 万人（指定席 500 × 24 ブロック + 自由席 250 × 32 ブロック）。件数は [demo-data.md](demo-data.md) の「規模」（規模の数字はそこが正）。
+  合成データの仕様・特徴量の約束も demo-data.md
 - 管理画面 http://localhost:3100/admin （ユーザー切替で先頭の「管理者」を選ぶ）で試合ごとの割当を塗り替えられる（下の「割当エディタ」）
 - events は `events:export` で RustFS（S3 互換）に、DuckDB（`scripts/analytics.sh`）で集計できる（下の「イベントログのエクスポートと分析」）
 
@@ -147,14 +147,14 @@ scripts/analytics.sh shell     # DuckDB の対話モード
 - 非対話の `docker compose run` は `-T` が要る（無いと `-c` が compose のフラグとして解釈される）。イメージは distroless でシェルが無い
 - `analytics/penusta.duckdb` は単一プロセスしか書けない。`shell` を開いたまま `build` しない
 - ファネル（2026-11-16、`--seasons=7`、リセールを買ったセッションを除く）: (session_id, match_id) 単位で view_match 2,149,161 → view_seatmap 1,340,509 →
-  add_to_cart 842,734 → purchase 511,571。順序つき到達も 511,571。orders（kind=purchase）511,587 との差は E2E の 16 件。build は約 17 秒
-- export の全期間は `--from=2021-01-01 --to=2026-12-31`（約 2.5 分）。0 件の日は既存キーを消すので、旧データの残骸もこれで消える
+  add_to_cart 842,734 → purchase 511,571。順序つき到達も 511,571。orders（kind=purchase）511,587 との差は E2E の 16 件
+- export の全期間は `--from=2021-01-01 --to=2026-12-31`（時間は demo-data.md の「規模」）。0 件の日は既存キーを消すので、旧データの残骸もこれで消える
 - 前日分は scheduler が毎日 00:30 UTC（JST 09:30）に自動で出す（下の「scheduler」）
 
 #### 業務テーブル（`tables:export`、2026-11-16）
 
 ```bash
-docker compose exec app php artisan tables:export                          # 15 表すべて（約 25 秒）
+docker compose exec app php artisan tables:export                          # 15 表すべて
 docker compose exec app php artisan tables:export --table=matches --table=teams
 scripts/analytics.sh query sold_by_round                                  # analytics/queries/<名前>.sql（_pg で終わるものは psql 用で弾く）
 ```
@@ -168,7 +168,7 @@ scripts/analytics.sh query sold_by_round                                  # anal
 - 15 表は `REPEATABLE READ READ ONLY` のトランザクションで読み、同じ時点のスナップショットにする
 - curated は `curated/<table>/part-0.parquet`。`scripts/analytics.sh build` は raw に 16 個の prefix が揃っていないと止まる
 - scheduler は events:export の後、毎日 00:40 UTC
-- 確認（2026-11-16、`--seasons=7`）: orders 919,162 / tickets 1,555,115 が開発 DB と一致。`sold_by_round` は 1-5 の記事の PostgreSQL の結果と一致。
+- 確認（2026-11-16、`--seasons=7`）: orders / tickets の件数が開発 DB と一致。`sold_by_round` は 1-5 の記事の PostgreSQL の結果と一致。
   `sold_per_match_by_category` は割当で絞らず away に割り当てたブロックの販売も席種に含める（calibration_pg.sql とは定義が違う）
 - 実 AWS への同期（`aws-analytics.sh sync`）と Glue のテーブル定義はまだ events だけ（2-2 で足す）
 

@@ -15,6 +15,7 @@
 - Next.js のコードを書く前に `frontend/node_modules/next/dist/docs/` の該当ガイドを読む（学習済みの規約と違う）
 - API 契約は `frontend/src/lib/api.ts` の型が正。backend をこれに合わせる
 - matches テーブルのモデルは `FootballMatch`、events テーブルは `ActivityEvent`
+- 規模の数字（件数・サイズ・時間）は `docs/demo-data.md` の「規模」を正とする。他の docs や記事はそこを参照し、測り直したら demo-data.md を直す
 - テストは別 DB `penusta_test` で走る。開発 DB `penusta` への `migrate:fresh` 等はユーザーに確認してから
 - 検証は `scripts/check.sh [backend|frontend|shell|secrets|all]`（`all` は backend + frontend + shell + secrets。shell は `scripts/*.sh` の bash 3.2 構文・ShellCheck・`$VAR` 直後のマルチバイト検査。secrets はホストの gitleaks で全履歴と `docs/private/` を検査）
 - 秘密情報の検査: ホストの gitleaks（`brew install gitleaks`）を pre-commit フック（`scripts/git-hooks/pre-commit`、`git config core.hooksPath scripts/git-hooks` で有効）と `check.sh secrets` で回す。フックで止まったら値を消してから再コミットし、`--no-verify` で通さない

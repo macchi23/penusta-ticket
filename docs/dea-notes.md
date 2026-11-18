@@ -22,7 +22,7 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 
 **ペヌスタでの使い方**
 - `raw/events/dt=YYYY-MM-DD/part-0000.jsonl.gz`（`backend/app/Console/Commands/ExportEvents.php`）
-- dt は occurred_at（イベント時刻）の UTC 日付。1 日は中央 2,666 行・最大 7,656 行（gzip で中央 72.5KB・最大 207KB、2026-11-16 実測）。
+- dt は occurred_at（イベント時刻）の UTC 日付。1 日の行数とサイズは demo-data.md の「規模」（中央で 100KB に届かない）。
   量としては日単位でも細かすぎる（DuckDB の目安は 1 パーティション 100MB 以上）が、日次の書き出しと上書きの単位に合わせて日で切っている
 - ファイルの中に dt 列は入れない（パスから取る）
 
@@ -138,8 +138,8 @@ AWS Certified Data Engineer – Associate（DEA-C01）の論点を、このリ�
 ## 5. ファイルサイズ（small files 問題）
 
 **ペヌスタでの使い方**
-- 1 dt = 1 ファイル。1 日分は gzip で中央 72.5KB・最大 207KB（2026-11-16、1,853 dt）なので分割しない
-- DuckDB の PARTITION_BY は、同時に開いておくファイル数に上限がある（`partitioned_write_max_open_files`、既定 100）。dt は 1,853 個あるので、
+- 1 dt = 1 ファイル。1 日分は小さい（demo-data.md の「規模」）ので分割しない
+- DuckDB の PARTITION_BY は、同時に開いておくファイル数に上限がある（`partitioned_write_max_open_files`、既定 100）。dt は上限より多い（1,800 個超）ので、
   書き出しの途中で閉じられた dt に後から行が来ると part-1 が新しく開かれ、build のたびに 2〜8 個の dt が 2 ファイルになった（2026-11-16〜17 の測定）。
   events の COPY だけ上限を 10000 に上げて 1 dt 1 ファイルにし、build の最後に part-0 以外が無いことを確かめている（`analytics/export_curated.sql`、`scripts/analytics.sh`）。
   threads=1 でも直るが、それは events が dt 順に並んでいるからで、並びに依存する
